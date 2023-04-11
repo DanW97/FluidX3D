@@ -1,12 +1,15 @@
-# command line argument(s): device ID(s); if empty, FluidX3D will automatically choose the fastest available device(s)
+set -e
+# command line argument(s): 
+# -in [path to liggghts input file]
+# -log [path to liggghts logs]
+# device number (fluidx3d)
+
+# TODO enforce that we at least get a liggghts file as a command arg
 
 mkdir -p bin # create directory for executable
-rm -f ./bin/FluidX3D # prevent execution of old version if compiling fails
+rm -f ./bin/LX3D # cleanup
 
-#g++ ./src/*.cpp -o ./bin/FluidX3D -std=c++17 -pthread -I./src/OpenCL/include -L./src/OpenCL/lib -lOpenCL -I./src/X11/include -L./src/X11/lib -lX11 # compile on Linux with X11
+# the only compiliation option here will be linux, no X11
+mpiCC ./src/*.cpp -o ./bin/LX3D -std=c++17 -pthread -I./src/OpenCL/include -I$LIGGGHTS_DIR/include -L./src/OpenCL/lib -lOpenCL -L/home/dan/LIGGGHTS/build -l:libliggghts.so
 
-g++ ./src/*.cpp -o ./bin/FluidX3D -std=c++17 -pthread -I./src/OpenCL/include -L./src/OpenCL/lib -lOpenCL # compile on Linux (without X11)
-#g++ ./src/*.cpp -o ./bin/FluidX3D -std=c++17 -pthread -I./src/OpenCL/include -framework OpenCL # compile on macOS (without X11)
-#g++ ./src/*.cpp -o ./bin/FluidX3D -std=c++17 -pthread -I./src/OpenCL/include -L/system/vendor/lib64 -lOpenCL # compile on Android (without X11)
-
-./bin/FluidX3D "$@" # run FluidX3D
+./bin/LX3D "$@" # run LX3D
