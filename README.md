@@ -58,6 +58,11 @@ The fastest and most memory efficient lattice Boltzmann CFD software, running on
   - fixed bug in make.sh where multi-GPU device IDs would not get forwarded to the executable
   - minor bug fixes in graphics engine (free cursor not centered during rotation, labels in VR mode)
   - fixed bug in LBM::voxelize_stl() size parameter standard initialization
+- v2.5 (11.04.2023)
+  - implemented light absorption in fluid for raytracing graphics (no performance impact)
+  - improved raytracing framerate when camera is inside fluid
+  - fixed skybox pole flickering artifacts
+  - fixed bug where moving objects during re-voxelization would leave an erroneous trail of solid grid cells behind
 
 </details>
 
@@ -86,32 +91,30 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
 
 - peak performance on GPUs (datacenter/gaming/professional/laptop), validated with roofline model
 - optimized to minimize memory demand:
-  - traditional D3Q19 LBM with FP64 requires ~344 Bytes/cell
+  - traditional LBM (D3Q19) with FP64 requires ~344 Bytes/cell
+    ```
+    🟧🟧🟧🟧🟧🟧🟧🟧🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦
+    🟨🟨🟨🟨🟨🟨🟨🟨🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+    🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+    🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+    🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+    🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+    🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
+    🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
+    🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
+    🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
+    🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
 
-    ```bash
-    |ρ:ρ:ρ:ρ:ρ:ρ:ρ:ρ|u:u:u:u:u:u:u:u|u:u:u:u:u:u:u:u|u:u:u:u:u:u:u:u|
-    |f:f:f:f:f:f:f:f|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|
-    |A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|
-    |A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|
-    |A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|
-    |A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|
-    |B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|
-    |B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|
-    |B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|
-    |B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|
-    |B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|B:B:B:B:B:B:B:B|
-
-    (illustration: density ρ, velocity u, flags f, 2 copies of DDFs A/B; each symbol = 1 Byte)
+    (density 🟧, velocity 🟦, flags 🟨, 2 copies of DDFs 🟩/🟥; each square = 1 Byte)
     ```
 
     - allows for 3 Million cells per 1 GB VRAM
-  - FluidX3D requires only 55 Bytes/cell with [Esoteric-Pull](https://doi.org/10.3390/computation10060092)+[FP16](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats)
+  - FluidX3D (D3Q19) requires only 55 Bytes/cell with [Esoteric-Pull](https://doi.org/10.3390/computation10060092)+[FP16](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats)
+    ```
+    🟧🟧🟧🟧🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟨🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+    🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
 
-    ```bash
-    |ρ:ρ:ρ:ρ|u:u:u:u|u:u:u:u|u:u:u:u|f|A:A|A:A|A:A|A:A|A:A|A:A|A:A|
-    |A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|
-
-    (illustration: density ρ, velocity u, flags f, DDFs A; each symbol = 1 Byte)
+    (density 🟧, velocity 🟦, flags 🟨, DDFs 🟩; each square = 1 Byte)
     ```
 
     - allows for 19 Million cells per 1 GB VRAM
