@@ -2,9 +2,17 @@
 
 The fastest and most memory efficient lattice Boltzmann CFD software, running on all GPUs via [OpenCL](https://github.com/ProjectPhysX/OpenCL-Wrapper "OpenCL-Wrapper"). This fork couples FluidX3D to the Birmingham [LIGGGHTS](https://github.com/uob-positron-imaging-centre/PICI-LIGGGHTS) fork.
 
+<details><summary>Coupling Features</summary>
+
+- Particles handled on CPU, enabling multi-GPU simulations with particles.
+  - LIGGGHTS will handle particle dynamics, all FluidX3D "sees" is coverage fractions that affect collision operator values.
+- Coverage operator method used for determining coupling forces.
+  - Some more details on it (TODO)
+
+</details>
+
 <a href="https://youtu.be/o3TPN142HxM"><img src="https://img.youtube.com/vi/o3TPN142HxM/maxresdefault.jpg" width="50%"></img></a><a href="https://youtu.be/oC6U1M0Fsug"><img src="https://img.youtube.com/vi/oC6U1M0Fsug/maxresdefault.jpg" width="50%"></img></a><br>
 <a href="https://youtu.be/NQPgumd3Ei8"><img src="https://img.youtube.com/vi/NQPgumd3Ei8/maxresdefault.jpg" width="50%"></img></a><a href="https://youtu.be/aqG8qZ_Gc4U"><img src="https://img.youtube.com/vi/aqG8qZ_Gc4U/maxresdefault.jpg" width="50%"></img></a>
-
 
 <details><summary>Update History</summary>
 
@@ -53,7 +61,6 @@ The fastest and most memory efficient lattice Boltzmann CFD software, running on
 
 </details>
 
-
 ## Compute Features
 
 - CFD model: lattice Boltzmann method (LBM)
@@ -80,7 +87,8 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
 - peak performance on GPUs (datacenter/gaming/professional/laptop), validated with roofline model
 - optimized to minimize memory demand:
   - traditional D3Q19 LBM with FP64 requires ~344 Bytes/cell
-    ```
+
+    ```bash
     |ρ:ρ:ρ:ρ:ρ:ρ:ρ:ρ|u:u:u:u:u:u:u:u|u:u:u:u:u:u:u:u|u:u:u:u:u:u:u:u|
     |f:f:f:f:f:f:f:f|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|
     |A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|A:A:A:A:A:A:A:A|
@@ -95,14 +103,17 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
 
     (illustration: density ρ, velocity u, flags f, 2 copies of DDFs A/B; each symbol = 1 Byte)
     ```
+
     - allows for 3 Million cells per 1 GB VRAM
   - FluidX3D requires only 55 Bytes/cell with [Esoteric-Pull](https://doi.org/10.3390/computation10060092)+[FP16](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats)
-    ```
+
+    ```bash
     |ρ:ρ:ρ:ρ|u:u:u:u|u:u:u:u|u:u:u:u|f|A:A|A:A|A:A|A:A|A:A|A:A|A:A|
     |A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|A:A|
 
     (illustration: density ρ, velocity u, flags f, DDFs A; each symbol = 1 Byte)
     ```
+
     - allows for 19 Million cells per 1 GB VRAM
     - in-place streaming with [Esoteric-Pull](https://doi.org/10.3390/computation10060092): eliminates redundant copy `B` of density distribution functions (DDFs) in memory; almost cuts memory demand in half and slightly increases performance due to implicit bounce-back boundaries; offers optimal memory access patterns for single-cell in-place streaming
     - [decoupled arithmetic precision (FP32) and memory precision (FP32 or FP16S or FP16C)](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats): all arithmetic is done in FP32 for compatibility on all hardware, but DDFs in memory can be compressed to FP16S or FP16C: almost cuts memory demand in half again and almost doubles performance, without impacting overall accuracy for most setups
@@ -208,8 +219,6 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
   - `TYPE_X` remaining for custom use or further extensions
   - `TYPE_Y` remaining for custom use or further extensions
 
-
-
 ## Optional Compute Extensions
 
 - [boundary types](https://doi.org/10.15495/EPub_UBT_00005400)
@@ -233,8 +242,6 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
   <details><summary>&#9900; &nbsp;equations</summary><p align="center"><i>&Pi;<sub>&alpha;&beta;</sub></i> = &Sigma;<sub><i>i</i></sub> <i>e<sub>i&alpha;</sub></i> <i>e<sub>i&beta;</sub></i> (<i>f<sub>i</sub></i> - <i>f<sub>i</sub></i><sup>eq-shifted</sup>)<br><br>Q = &Sigma;<sub><i>&alpha;&beta;</i></sub> <i>&Pi;<sub>&alpha;&beta;</sub></i><sup>2</sup><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;______________________<br>&tau; = &frac12; (&tau;<sub>0</sub> + &radic; &tau;<sub>0</sub><sup>2</sup> + <sup>(16&radic;2)</sup>&#8725;<sub>(<i>3&pi;</i><sup>2</sup>)</sub> <sup>&radic;Q</sup>&#8725;<sub><i>&rho;</i></sub> )</p></details>
 - particles with immersed-boundary method (either passive or 2-way-coupled, only supported with single-GPU)
 
-
-
 ## Graphics Features
 
 - on Windows and Linux: real time [interactive rasterization and raytracing graphics](https://www.researchgate.net/publication/360501260_Combined_scientific_CFD_simulation_and_interactive_raytracing_with_OpenCL)
@@ -248,8 +255,6 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
   - velocity-colored Q-criterion isosurface
   - rasterized free surface with [marching-cubes](http://paulbourke.net/geometry/polygonise/)
   - [raytraced free surface](https://www.researchgate.net/publication/360501260_Combined_scientific_CFD_simulation_and_interactive_raytracing_with_OpenCL) with fast ray-grid traversal and marching-cubes, either 1-4 rays/pixel or 1-10 rays/pixel
-
-
 
 ## How to get started?
 
@@ -284,8 +289,6 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
    - <kbd>N</kbd>/<kbd>M</kbd>: adjust eye distance for stereoscopic rendering
    - <kbd>Esc</kbd>/<kbd>Alt</kbd>+<kbd>F4</kbd>: quit
 
-
-
 ## Compatibility
 
 - works in Windows, Linux and Android with C++17
@@ -302,11 +305,10 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
 - supports exporting volumetric data as binary `.vtk` files
 - supports exporting rendered frames as `.png`/`.qoi`/`.bmp` files; time-consuming image encoding is handled in parallel on the CPU while the simulation on GPU can continue without delay
 
-
-
 ## Single-GPU Benchmarks
 
 Here are [performance benchmarks](https://doi.org/10.3390/computation10060092) on various hardware in MLUPs/s, or how many million lattice points are updated per second. The settings used for the benchmark are D3Q19 SRT with no extensions enabled (only LBM with implicit mid-grid bounce-back boundaries) and the setup consists of an empty cubic box with sufficient size (typically 256³). Without extensions, a single lattice point requires:
+
 - a memory capacity of 93 (FP32/FP32) or 55 (FP32/FP16) Bytes
 - a memory bandwidth of 153 (FP32/FP32) or 77 (FP32/FP16) Bytes per time step
 - 363 (FP32/FP32) or 406 (FP32/FP16S) or 1275 (FP32/FP16C) FLOPs per time step (FP32+INT32 operations counted combined)
@@ -400,8 +402,6 @@ If your GPU is not on the list yet, you can report your benchmarks [here](https:
 | Intel Core i7-4770            |               0.44 |          16 |           26 |              104 (62%) |                69 (21%) |                59 (18%) |
 | Intel Core i7-4720HQ          |               0.33 |          16 |           26 |               58 (35%) |                13 ( 4%) |                47 (14%) |
 
-
-
 ## Multi-GPU Benchmarks
 
 Multi-GPU benchmarks are done at the largest possible grid resolution with a cubic domain, and either 2x1x1, 2x2x1 or 2x2x2 of these cubic domains together. The percentages in brackets are single-GPU roofline model efficiency, and the multiplicator numbers in brackets are scaling factors relative to benchmarked single-GPU performance.
@@ -440,8 +440,6 @@ Multi-GPU benchmarks are done at the largest possible grid resolution with a cub
 | 4x Nvidia GeForce RTX 2080 Ti |              53.80 |          44 |         2464 |            9117 (2.9x) |            18415 (2.7x) |            18598 (2.7x) |
 | 7x RTX 2080 Ti + 1x A100 40GB |             107.60 |          88 |         4928 |           16146 (5.1x) |            33732 (5.0x) |            33857 (4.9x) |
 
-
-
 ## Maximum Single-Domain Grid Resolution for D3Q19 LBM
 
 | Memory | FP32/FP32 | FP32/FP16 |
@@ -468,8 +466,6 @@ Multi-GPU benchmarks are done at the largest possible grid resolution with a cub
 | 192 GB |     1292³ |     1540³ |
 | 256 GB |     1422³ |     1624³ |
 | 384 GB |     1624³ |     1624³ |
-
-
 
 ## FAQs
 
@@ -525,8 +521,6 @@ Multi-GPU benchmarks are done at the largest possible grid resolution with a cub
 
 - <details><summary>Will FluidX3D at some point be available with a commercial license?</summary><br>Maybe I will add the option for a second, commercial license later on. If you are interested in commercial use, let me know. For non-commercial use in science and education, FluidX3D is and will always be free.<br><br></details>
 
-
-
 ## External Code/Libraries/Images used in FluidX3D
 
 - [OpenCL-Headers](https://github.com/KhronosGroup/OpenCL-Headers) for GPU parallelization ([Khronos Group](https://www.khronos.org/opencl/))
@@ -537,8 +531,6 @@ Multi-GPU benchmarks are done at the largest possible grid resolution with a cub
 - [SimplexNoise](https://weber.itn.liu.se/~stegu/simplexnoise/SimplexNoise.java) class in [`src/utilities.hpp`](https://github.com/ProjectPhysX/FluidX3D/blob/master/src/utilities.hpp) for generating continuous noise in 2D/3D/4D space ([Stefan Gustavson](https://github.com/stegu))
 - [`skybox/skybox8k.png`](https://www.hdri-hub.com/hdri-skies-aviation-aerospace) for free surface raytracing ([HDRI Hub](https://www.hdri-hub.com/))
 
-
-
 ## References
 
 - Lehmann, M.: [Esoteric Pull and Esoteric Push: Two Simple In-Place Streaming Schemes for the Lattice Boltzmann Method on GPUs](https://doi.org/10.3390/computation10060092). Computation, 10, 92, (2022)
@@ -547,8 +539,6 @@ Multi-GPU benchmarks are done at the largest possible grid resolution with a cub
 - Lehmann, M., Oehlschlägel, L.M., Häusl, F., Held, A. and Gekle, S.: [Ejection of marine microplastics by raindrops: a computational and experimental study](https://doi.org/10.1186/s43591-021-00018-8). Micropl.&Nanopl. 1, 18, (2021)
 - Lehmann, M.: [High Performance Free Surface LBM on GPUs](https://doi.org/10.15495/EPub_UBT_00005400). Master's thesis, (2019)
 - Lehmann, M. and Gekle, S.: [Analytic Solution to the Piecewise Linear Interface Construction Problem and Its Application in Curvature Calculation for Volume-of-Fluid Simulation Codes](https://doi.org/10.3390/computation10020021). Computation, 10, 21, (2022)
-
-
 
 ## Contact
 
