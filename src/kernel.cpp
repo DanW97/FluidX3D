@@ -165,7 +165,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	else if(h<360.0f) { r = c; b = x; }
 	return (int)((r+m)*255.0f)<<16|(int)((g+m)*255.0f)<<8|(int)((b+m)*255.0f);
 }
-)+R(int lighting(const int c, const float3 p, const float3 normal, const float* camera_cache) { // calculate lighting of triangle
+)+R(int shading(const int c, const float3 p, const float3 normal, const float* camera_cache) { // calculate shading of triangle
 	const float dis  = camera_cache[ 1]; // fetch camera parameters (rotation matrix, camera position, etc.)
 	const float posx = camera_cache[ 2]-def_domain_offset_x;
 	const float posy = camera_cache[ 3]-def_domain_offset_y;
@@ -599,7 +599,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	camray.direction = p1-p0;
 	return camray;
 }
-)+R(uint skybox_bottom(const ray r, const int c1, const int c2, const uint skybox_color) {
+)+R(int skybox_bottom(const ray r, const int c1, const int c2, const int skybox_color) {
 	const float3 p0=(float3)(0.0f, 0.0f, -0.5f*(float)def_Nz), p1=(float3)(1.0f, 0.0f, -0.5f*(float)def_Nz), p2=(float3)(0.0f, 1.0f, -0.5f*(float)def_Nz);
 	const float distance = intersect_plane(r, p0, p1, p2);
 	if(distance>0.0f) { // ray intersects with bottom
@@ -615,25 +615,25 @@ string opencl_c_container() { return R( // ########################## begin of O
 		return skybox_color;
 	}
 }
-)+R(uint skybox_color_bw(const float x, const float y) {
+)+R(int skybox_color_bw(const float x, const float y) {
 	return color_dim(0xFFFFFF, 1.0f-y);
 }
-)+R(uint skybox_color_hsv(const float x, const float y) {
+)+R(int skybox_color_hsv(const float x, const float y) {
 	const float h = fmod(x*360.0f+120.0f, 360.0f);
 	const float s = y>0.5f ? 1.0f : 2.0f*y;
 	const float v = y>0.5f ? 2.0f-2.0f*y : 1.0f;
 	return hsv_to_rgb(h, s, v);
 }
-)+R(uint skybox_color_sunset(const float x, const float y) {
+)+R(int skybox_color_sunset(const float x, const float y) {
 	return color_mix(255<<16|175<<8|55, y<0.5f ? 55<<16|111<<8|255 : 0, 2.0f*(0.5f-fabs(y-0.5f)));
 }
-)+R(uint skybox_color_grid(const float x, const float y, const int c1, const int c2) {
+)+R(int skybox_color_grid(const float x, const float y, const int c1, const int c2) {
 	int a = (int)(72.0f*x);
 	int b = (int)(36.0f*y);
 	const int w = (a%2==b%2);
 	return w*c1+(1-w)*c2;
 }
-)+R(uint skybox_color(const ray r, const global int* skybox) {
+)+R(int skybox_color(const ray r, const global int* skybox) {
 	const float3 direction = normalize(r.direction); // to avoid artifacts from asin(direction.z)
 	//const float x = fma(atan2(direction.x, direction.y),  0.5f/3.1415927f, 0.5f);
 	//const float y = fma(asin (direction.z             ), -1.0f/3.1415927f, 0.5f);
@@ -643,11 +643,11 @@ string opencl_c_container() { return R( // ########################## begin of O
 	const float fu = (float)def_skybox_width *fma(atan2(direction.x, direction.y),  0.5f/3.1415927f, 0.5f);
 	const float fv = (float)def_skybox_height*fma(asin (direction.z             ), -1.0f/3.1415927f, 0.5f);
 	const int ua=clamp((int)fu, 0, (int)def_skybox_width-1), va=clamp((int)fv, 0, (int)def_skybox_height-1), ub=(ua+1)%def_skybox_width, vb=min(va+1, (int)def_skybox_height-1); // bilinear interpolation positions
-	const uint s00=skybox[ua+va*def_skybox_width], s01=skybox[ua+vb*def_skybox_width], s10=skybox[ub+va*def_skybox_width], s11=skybox[ub+vb*def_skybox_width];
+	const int s00=skybox[ua+va*def_skybox_width], s01=skybox[ua+vb*def_skybox_width], s10=skybox[ub+va*def_skybox_width], s11=skybox[ub+vb*def_skybox_width];
 	const float u1=fu-(float)ua, v1=fv-(float)va, u0=1.0f-u1, v0=1.0f-v1; // interpolation factors
 	return color_mix(color_mix(s00, s01, v0), color_mix(s10, s11, v0), u0); // perform bilinear interpolation
 }
-)+R(uint last_ray_reflectivity(const ray reflection, const ray transmission, const float reflectivity, const float transmissivity, const global int* skybox) {
+)+R(int last_ray(const ray reflection, const ray transmission, const float reflectivity, const float transmissivity, const global int* skybox) {
 	return color_mix(skybox_color(reflection, skybox), color_mix(skybox_color(transmission, skybox), def_absorption_color, transmissivity), reflectivity);
 }
 )+R(float ray_grid_traverse(const ray r, const global float* phi, const global uchar* flags, float3* normal, const uint Nx, const uint Ny, const uint Nz) {
@@ -1217,7 +1217,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	};
 	return c[i];
 }
-)+R(float curvature_calculation(const uint n, const float* phit, const global float* phi) { // calculate surface curvature, always use D3Q27 stencil here, source: https://doi.org/10.3390/computation10020021
+)+R(float calculate_curvature(const uint n, const float* phit, const global float* phi) { // calculate surface curvature, always use D3Q27 stencil here, source: https://doi.org/10.3390/computation10020021
 )+"#ifndef D2Q9"+R(
 	float phij[27];
 	get_remaining_neighbor_phij(n, phit, phi, phij); // complete neighborhood from whatever velocity set is selected to D3Q27
@@ -1260,7 +1260,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	const float center_offset = plic_cube(phit[0], by); // calculate z-offset PLIC of center point only once
 	for(uint i=1u; i<9u; i++) { // iterate over neighbors, no loop unrolling here (50% better perfoemance without loop unrolling)
 		if(phit[i]>0.0f&&phit[i]<1.0f) { // limit neighbors to interface nodes
-			const float3 ei = (float3)(c_D2Q9(i), c_D2Q9(9+i), 0.0f); // assume neighbor normal vector is the same as center normal vector
+			const float3 ei = (float3)(c(i), c(9u+i), 0.0f); // assume neighbor normal vector is the same as center normal vector
 			const float offset = plic_cube(phit[i], by)-center_offset;
 			p[number++] = (float2)(dot(ei, bx), dot(ei, by)+offset); // do coordinate system transformation into (x, f(x)) and apply PLIC pffsets
 		}
@@ -1685,7 +1685,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 		uyn = clamp(uyn, -def_c, def_c);
 		uzn = clamp(uzn, -def_c, def_c);
 		phij[0] = calculate_phi(rhon, massn, flagsn); // don't load phi[n] from memory, instead recalculate it with mass corrected by excess mass
-		rho_laplace = def_6_sigma==0.0f ? 0.0f : def_6_sigma*curvature_calculation(n, phij, phi); // surface tension least squares fit (PLIC, most accurate)
+		rho_laplace = def_6_sigma==0.0f ? 0.0f : def_6_sigma*calculate_curvature(n, phij, phi); // surface tension least squares fit (PLIC, most accurate)
 		float feg[def_velocity_set]; // reconstruct f from neighbor gas lattice points
 		const float rho2tmp = 0.5f/rhon; // apply external volume force (Guo forcing, Krueger p.233f)
 		const float uxntmp = clamp(fma(fx, rho2tmp, uxn), -def_c, def_c); // limit velocity (for stability purposes)
@@ -1922,7 +1922,26 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // FORCE_FIELD
 
 )+"#ifdef PARTICLES"+R(
-)+R(kernel void integrate_particles)+"("+R(global float* particles, const global float* u // ) {
+)+R(float3 particle_boundary_force(const float3 p, const global uchar* flags) { // normalized pseudo-force to prevent particles from entering solid boundaries or exiting fluid phase
+	const float xa=p.x-0.5f+1.5f*def_Nx, ya=p.y-0.5f+1.5f*def_Ny, za=p.z-0.5f+1.5f*def_Nz; // subtract lattice offsets
+	const uint xb=(uint)xa, yb=(uint)ya, zb=(uint)za; // integer casting to find bottom left corner
+	const float x1=xa-(float)xb, y1=ya-(float)yb, z1=za-(float)zb; // calculate interpolation factors
+	float3 boundary_force = (float3)(0.0f, 0.0f, 0.0f);
+	float boundary_distance = 2.0f;
+	for(uint c=0u; c<8u; c++) { // count over eight corner points
+		const uint i=(c&0x04u)>>2, j=(c&0x02u)>>1, k=c&0x01u; // disassemble c into corner indices ijk
+		const uint x=(xb+i)%def_Nx, y=(yb+j)%def_Ny, z=(zb+k)%def_Nz; // calculate corner lattice positions
+		const uint n = x+(y+z*def_Ny)*def_Nx; // calculate lattice linear index
+		if(flags[n]&(TYPE_S|TYPE_G)) {
+			boundary_force += (float3)(0.5f, 0.5f, 0.5f)-(float3)((float)i, (float)j, (float)k);
+			boundary_distance = fmin(boundary_distance, length((float3)(x1, y1, z1)-(float3)((float)i, (float)j, (float)k)));
+		}
+	}
+	const float particle_radius = 0.5f; // has to be between 0.0f and 0.5f, default: 0.5f (hydrodynamic radius)
+	return boundary_distance-0.5f<particle_radius ? normalize(boundary_force) : (float3)(0.0f, 0.0f, 0.0f);
+} // particle_boundary_force()
+
+)+R(kernel void integrate_particles)+"("+R(global float* particles, const global float* u, const global uchar* flags, const float time_step_multiplicator // ) {
 )+"#ifdef FORCE_FIELD"+R(
 	, volatile global float* F, const float fx, const float fy, const float fz
 )+"#endif"+R( // FORCE_FIELD
@@ -1937,7 +1956,9 @@ string opencl_c_container() { return R( // ########################## begin of O
 		spread_force(F, p0, Fn); // do force spreading
 	}
 )+"#endif"+R( // FORCE_FIELD
-	const float3 un = interpolate_u(mirror_position(p0), u); // trilinear interpolation of velocity at point p
+	const float3 p0_mirrored = mirror_position(p0);
+	float3 un = interpolate_u(p0_mirrored, u); // trilinear interpolation of velocity at point p
+	un = (un+length(un)*particle_boundary_force(p0_mirrored, flags))*time_step_multiplicator;
 	const float3 p = mirror_position(p0+un); // advect particles
 	particles[                           n] = p.x;
 	particles[    def_particles_N+(ulong)n] = p.y;
@@ -2323,16 +2344,16 @@ string opencl_c_container() { return R( // ########################## begin of O
 		const float Fnl = length(Fn);
 		if(Fnl>0.0f) {
 			const int c = iron_color(255.0f*Fnl); // color boundaries depending on the force on them
-			draw_line(p, p+5.0f*Fn, c, camera_cache, bitmap, zbuffer); // draw colored force vectors
+			draw_line(p, p+Fn, c, camera_cache, bitmap, zbuffer); // draw colored force vectors
 		}
 	}
 )+"#endif"+R( // FORCE_FIELD
-}/**/
+}
 
-/*)+"#ifndef FORCE_FIELD"+R( // render solid boundaries with marching-cubes
-)+R(kernel void graphics_flags(const global uchar* flags, const global float* camera, global int* bitmap, global int* zbuffer) {
+)+"#ifndef FORCE_FIELD"+R( // render solid boundaries with marching-cubes
+)+R(kernel void graphics_flags_mc(const global uchar* flags, const global float* camera, global int* bitmap, global int* zbuffer) {
 )+"#else"+R( // FORCE_FIELD
-)+R(kernel void graphics_flags(const global uchar* flags, const global float* camera, global int* bitmap, global int* zbuffer, const global float* F) {
+)+R(kernel void graphics_flags_mc(const global uchar* flags, const global float* camera, global int* bitmap, global int* zbuffer, const global float* F) {
 )+"#endif"+R( // FORCE_FIELD
 	const uint n = get_global_id(0);
 	if(n>=(uint)def_N||is_halo(n)) return; // don't execute graphics_flags() on halo
@@ -2362,31 +2383,43 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
 	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
 	const float3 offset = (float3)((float)xyz.x+0.5f-0.5f*(float)def_Nx, (float)xyz.y+0.5f-0.5f*(float)def_Ny, (float)xyz.z+0.5f-0.5f*(float)def_Nz);
-	for(uint i=0u; i<tn; i++) {
-		const float3 p0 = triangles[3u*i   ]+offset;
-		const float3 p1 = triangles[3u*i+1u]+offset;
-		const float3 p2 = triangles[3u*i+2u]+offset;
-		const float3 p=(p0+p1+p2)/3.0f, normal=cross(p1-p0, p2-p0);
-		const int c = lighting(191<<16|191<<8|191, p, normal, camera_cache);
-		draw_triangle(p0, p1, p2, c, camera_cache, bitmap, zbuffer);
-	}
 )+"#ifdef FORCE_FIELD"+R(
-	const uchar flagsn_bo = flags[n]&TYPE_BO;
-	const float3 p = position(xyz);
-	if(flagsn_bo==TYPE_S) {
-		const float3 Fn = def_scale_F*(float3)(F[n], F[def_N+(ulong)n], F[2ul*def_N+(ulong)n]);
-		const float Fnl = length(Fn);
-		if(Fnl>0.0f) {
-			const int c = iron_color(255.0f*Fnl); // color boundaries depending on the force on them
-			draw_line(p, p+5.0f*Fn, c, camera_cache, bitmap, zbuffer); // draw colored force vectors
-		}
-	}
+	float3 Fj[8];
+	for(uint i=0u; i<8u; i++) Fj[i] = v[i]==1.0f ? (float3)(F[j[i]], F[def_N+(ulong)j[i]], F[2ul*def_N+(ulong)j[i]]) : (float3)(0.0f, 0.0f, 0.0f);
 )+"#endif"+R( // FORCE_FIELD
-}/**/
+	for(uint i=0u; i<tn; i++) {
+		const float3 p0 = triangles[3u*i   ];
+		const float3 p1 = triangles[3u*i+1u];
+		const float3 p2 = triangles[3u*i+2u];
+		const float3 normal = normalize(cross(p1-p0, p2-p0));
+)+"#ifdef FORCE_FIELD"+R(
+		int c0, c1, c2; {
+			const float x1=p0.x, y1=p0.y, z1=p0.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+			const float3 Fi = (x0*y0*z0)*Fj[0]+(x1*y0*z0)*Fj[1]+(x1*y0*z1)*Fj[2]+(x0*y0*z1)*Fj[3]+(x0*y1*z0)*Fj[4]+(x1*y1*z0)*Fj[5]+(x1*y1*z1)*Fj[6]+(x0*y1*z1)*Fj[7]; // perform trilinear interpolation
+			c0 = shading(rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal)), p0+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(Fi));
+		} {
+			const float x1=p1.x, y1=p1.y, z1=p1.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+			const float3 Fi = (x0*y0*z0)*Fj[0]+(x1*y0*z0)*Fj[1]+(x1*y0*z1)*Fj[2]+(x0*y0*z1)*Fj[3]+(x0*y1*z0)*Fj[4]+(x1*y1*z0)*Fj[5]+(x1*y1*z1)*Fj[6]+(x0*y1*z1)*Fj[7]; // perform trilinear interpolation
+			c1 = shading(rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal)), p1+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(Fi));
+		} {
+			const float x1=p2.x, y1=p2.y, z1=p2.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+			const float3 Fi = (x0*y0*z0)*Fj[0]+(x1*y0*z0)*Fj[1]+(x1*y0*z1)*Fj[2]+(x0*y0*z1)*Fj[3]+(x0*y1*z0)*Fj[4]+(x1*y1*z0)*Fj[5]+(x1*y1*z1)*Fj[6]+(x0*y1*z1)*Fj[7]; // perform trilinear interpolation
+			c2 = shading(rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal)), p2+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(Fi));
+		}
+		draw_triangle_interpolated(p0+offset, p1+offset, p2+offset, c0, c1, c2, camera_cache, bitmap, zbuffer); // draw triangle with interpolated colors
+)+"#else"+R( // FORCE_FIELD
+		const int c = shading(191<<16|191<<8|191, (p0+p1+p2)/3.0f+offset, normal, camera_cache);
+		draw_triangle(p0+offset, p1+offset, p2+offset, c, camera_cache, bitmap, zbuffer);
+)+"#endif"+R( // FORCE_FIELD
+	}
+}
 
-)+R(kernel void graphics_field(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer) {
+)+R(kernel void graphics_field(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer, const int slice_mode, const int slice_x, const int slice_y, const int slice_z) {
 	const uint n = get_global_id(0);
 	if(n>=(uint)def_N||is_halo(n)) return; // don't execute graphics_field() on halo
+	const uint3 xyz = coordinates(n);
+	const bool rx=(int)xyz.x!=slice_x, ry=(int)xyz.y!=slice_y, rz=(int)xyz.z!=slice_z;
+	if((slice_mode==1&&rx)||(slice_mode==2&&ry)||(slice_mode==3&&rz)||(slice_mode==4&&rx&&rz)||(slice_mode==5&&rx&&ry&&rz)||(slice_mode==6&&ry&&rz)||(slice_mode==7&&rx&&ry)) return;
 )+"#ifndef MOVING_BOUNDARIES"+R(
 	if(flags[n]&(TYPE_S|TYPE_E|TYPE_I|TYPE_G)) return;
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
@@ -2403,9 +2436,9 @@ string opencl_c_container() { return R( // ########################## begin of O
 }
 
 )+"#ifndef GRAPHICS_TEMPERATURE"+R(
-)+R(kernel void graphics_streamline(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer) {
+)+R(kernel void graphics_streamline(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer, const int slice_mode, const int slice_x, const int slice_y, const int slice_z) {
 )+"#else"+R( // GRAPHICS_TEMPERATURE
-)+R(kernel void graphics_streamline(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer, const global float* T) {
+)+R(kernel void graphics_streamline(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer, const int slice_mode, const int slice_x, const int slice_y, const int slice_z, const global float* T) {
 )+"#endif"+R( // GRAPHICS_TEMPERATURE
 	const uint n = get_global_id(0);
 )+"#ifndef D2Q9"+R(
@@ -2415,12 +2448,15 @@ string opencl_c_container() { return R( // ########################## begin of O
 	const uint y = t/(def_Nx/def_streamline_sparse);
 	const uint x = t%(def_Nx/def_streamline_sparse);
 	float3 p = (float)def_streamline_sparse*((float3)((float)x+0.5f, (float)y+0.5f, (float)z+0.5f))-0.5f*((float3)((float)def_Nx, (float)def_Ny, (float)def_Nz));
+	const bool rx=abs((int)(x*def_streamline_sparse+def_streamline_sparse/2u)-slice_x)>(int)def_streamline_sparse/2, ry=abs((int)(y*def_streamline_sparse+def_streamline_sparse/2u)-slice_y)>(int)def_streamline_sparse/2, rz=abs((int)(z*def_streamline_sparse+def_streamline_sparse/2u)-slice_z)>(int)def_streamline_sparse/2;
 )+"#else"+R( // D2Q9
 	if(n>=(def_Nx/def_streamline_sparse)*(def_Ny/def_streamline_sparse)) return;
 	const uint y = n/(def_Nx/def_streamline_sparse); // disassemble 1D index to 3D coordinates
 	const uint x = n%(def_Nx/def_streamline_sparse);
 	float3 p = ((float3)((float)def_streamline_sparse*((float)x+0.5f), (float)def_streamline_sparse*((float)y+0.5f), 0.5f))-0.5f*((float3)((float)def_Nx, (float)def_Ny, (float)def_Nz));
+	const bool rx=abs((int)(x*def_streamline_sparse+def_streamline_sparse/2u)-slice_x)>(int)def_streamline_sparse/2, ry=abs((int)(y*def_streamline_sparse+def_streamline_sparse/2u)-slice_y)>(int)def_streamline_sparse/2, rz=true;
 )+"#endif"+R( // D2Q9
+	if((slice_mode==1&&rx)||(slice_mode==2&&ry)||(slice_mode==3&&rz)||(slice_mode==4&&rx&&rz)||(slice_mode==5&&rx&&ry&&rz)||(slice_mode==6&&ry&&rz)||(slice_mode==7&&rx&&ry)) return;
 	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
 	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
 	const float hLx=0.5f*(float)(def_Nx-2u*(def_Dx>1u)), hLy=0.5f*(float)(def_Ny-2u*(def_Dy>1u)), hLz=0.5f*(float)(def_Nz-2u*(def_Dz>1u));
@@ -2545,20 +2581,19 @@ string opencl_c_container() { return R( // ########################## begin of O
 		const float3 p0 = triangles[3u*i   ]; // triangle coordinates in [0,1] (local cell)
 		const float3 p1 = triangles[3u*i+1u];
 		const float3 p2 = triangles[3u*i+2u];
-		const float3 normal = cross(p1-p0, p2-p0);
-		int c0, c1, c2;
-		{
+		const float3 normal = normalize(cross(p1-p0, p2-p0));
+		int c0, c1, c2; {
 			const float x1=p0.x, y1=p0.y, z1=p0.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
 			const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
-			c0 = lighting(rainbow_color(255.0f*def_scale_u*length(ui)), p0+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
+			c0 = shading(rainbow_color(255.0f*def_scale_u*length(ui)), p0+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
 		} {
 			const float x1=p1.x, y1=p1.y, z1=p1.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
 			const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
-			c1 = lighting(rainbow_color(255.0f*def_scale_u*length(ui)), p1+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
+			c1 = shading(rainbow_color(255.0f*def_scale_u*length(ui)), p1+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
 		} {
 			const float x1=p2.x, y1=p2.y, z1=p2.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
 			const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
-			c2 = lighting(rainbow_color(255.0f*def_scale_u*length(ui)), p2+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
+			c2 = shading(rainbow_color(255.0f*def_scale_u*length(ui)), p2+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
 		}
 		draw_triangle_interpolated(p0+offset, p1+offset, p2+offset, c0, c1, c2, camera_cache, bitmap, zbuffer); // draw triangle with interpolated colors
 	}
@@ -2597,7 +2632,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 		const float3 p1 = triangles[3u*i+1u]+offset;
 		const float3 p2 = triangles[3u*i+2u]+offset;
 		const float3 p=(p0+p1+p2)/3.0f, normal=cross(p1-p0, p2-p0);
-		const int c = lighting(55<<16|155<<8|255, p, normal, camera_cache);
+		const int c = shading(55<<16|155<<8|255, p, normal, camera_cache);
 		draw_triangle(p0, p1, p2, c, camera_cache, bitmap, zbuffer);
 		//draw_line(p0, p1, c, camera_cache, bitmap, zbuffer); // wireframe rendering
 		//draw_line(p0, p2, c, camera_cache, bitmap, zbuffer);
@@ -2610,12 +2645,12 @@ string opencl_c_container() { return R( // ########################## begin of O
 	ray reflection_next, transmission_next;
 	float reflection_reflectivity, reflection_transmissivity, transmission_reflectivity, transmission_transmissivity;
 	if(raytrace_phi(reflection, &reflection_next, &transmission_next, &reflection_reflectivity, &reflection_transmissivity, phi, flags, skybox, def_Nx, def_Ny, def_Nz)) {
-		color_reflect = last_ray_reflectivity(reflection_next, transmission_next, reflection_reflectivity, reflection_transmissivity, skybox);
+		color_reflect = last_ray(reflection_next, transmission_next, reflection_reflectivity, reflection_transmissivity, skybox);
 	} else {
 		color_reflect = skybox_color(reflection, skybox);
 	}
 	if(raytrace_phi(transmission, &reflection_next, &transmission_next, &transmission_reflectivity, &transmission_transmissivity, phi, flags, skybox, def_Nx, def_Ny, def_Nz)) {
-		color_transmit = last_ray_reflectivity(reflection_next, transmission_next, transmission_reflectivity, transmission_transmissivity, skybox);
+		color_transmit = last_ray(reflection_next, transmission_next, transmission_reflectivity, transmission_transmissivity, skybox);
 	} else {
 		color_transmit = skybox_color(transmission, skybox);
 	}
@@ -2650,7 +2685,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float reflectivity, transmissivity;
 	int pixelcolor = 0;
 	if(raytrace_phi(camray, &reflection, &transmission, &reflectivity, &transmissivity, phi, flags, skybox, def_Nx, def_Ny, def_Nz)) {
-		pixelcolor = last_ray_reflectivity(reflection, transmission, reflectivity, transmissivity, skybox); // 1 ray pass
+		pixelcolor = last_ray(reflection, transmission, reflectivity, transmissivity, skybox); // 1 ray pass
 		//pixelcolor = raytrace_phi_next_ray(reflection, transmission, reflectivity, transmissivity, phi, flags, skybox); // 2 ray passes
 	} else {
 		pixelcolor = skybox_color(camray, skybox);
