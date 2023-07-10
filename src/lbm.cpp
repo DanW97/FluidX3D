@@ -585,6 +585,12 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 #ifdef PARTICLES
 		particles = &(lbm[0]->particles);
 #endif // PARTICLES
+	} {
+#ifdef DEM // for now, adhere to the 
+		positions = &(lbm[0]->positions);
+		ids = &(lbm[0]->ids);
+		radii = &(lbm[0]->ids);		
+#endif // DEM
 	}
 #ifdef GRAPHICS
 	graphics = Graphics(this);
@@ -597,6 +603,8 @@ LBM::~LBM() {
 	delete[] lbm;
 }
 
+// TODO add something for DEM, as we need LIGGGHTS to exist, and particles
+// to be placed before we can sensibly start fluidx3d
 void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) { // sanity checks on grid resolution and extension support
 	if((ulong)Nx*(ulong)Ny*(ulong)Nz==0ull) print_error("Grid point number is 0: "+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+" = 0.");
 	if(Nx%Dx!=0u || Ny%Dy!=0u || Nz%Dz!=0u) print_error("LBM grid ("+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+") is not equally divisible in domains ("+to_string(Dx)+"x"+to_string(Dy)+"x"+to_string(Dz)+").");
@@ -685,6 +693,7 @@ void LBM::sanity_checks_initialization() { // sanity checks during initializatio
 #endif // TEMPERATURE
 }
 
+// TODO write LIGGGHTS array to device
 void LBM::initialize() { // write all data fields to device and call kernel_initialize
 	sanity_checks_initialization();
 

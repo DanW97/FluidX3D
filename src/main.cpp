@@ -67,6 +67,7 @@ int main(int argc, char *argv[]) {
     uint iter = 0;
     while (iter <= n_iters) {
         // lbm
+        // TODO see if the thread needs to be wrapped up in mpi or not
         thread fx3d_thread(lbm_iteration, n_iter);
         // dem
         const std::string cmd_string = "run "+std::to_string(n_iter);
