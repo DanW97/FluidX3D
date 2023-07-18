@@ -74,9 +74,19 @@ public:
 	Memory<float> particles; // particle positions
 #endif // PARTICLES
 #ifdef DEM
-	Memory<float> positions; // dem particle positions
-	Memory<uint> ids; // dem particle ids
-	Memory<float> radii; // dem particle radii
+// TODO see if i need to include coupling frequency as part of the LBM class or not
+	Memory<float> dem_positions; // dem particle positions
+	Memory<ulong> dem_ids; // dem particle ids
+	Memory<float> dem_radii; // dem particle radii
+    Memory<float> dem_force; // hydrodynamic force on dem particles
+    Memory<float> dem_torque; // hydrodynamic torque on dem particles
+    void reset_forces(); // sets arrays to zero before coupling step
+    // transfer calculated forces to liggghts array
+    // TODO see if i can directly write to the array or if i need a buffer
+    void transfer_force_to_host(const int* liggghts_force_array);
+    void transfer_torque_to_host(const int* liggghts_torque_array);
+
+
 #endif // DEM
 
 	Memory<char> transfer_buffer_p, transfer_buffer_m; // transfer buffers for multi-device domain communication, only allocate one set of transfer buffers in plus/minus directions, for all x/y/z transfers

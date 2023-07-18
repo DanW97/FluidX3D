@@ -63,6 +63,7 @@ int main(int argc, char *argv[]) {
     // lbm and dem to sync
     const uint n_iters = 1000;
     const uint n_iter = 10;
+    const uint dump_iter = 100;
     // main loop
     uint iter = 0;
     while (iter <= n_iters) {
@@ -74,12 +75,22 @@ int main(int argc, char *argv[]) {
         const char *cmd = cmd_string.c_str();
         lammps->input->one(cmd);
 
-        // particle positions to coverage collision operator
+        if iter % n_iter == 0 {
+            // particle positions to coverage collision operator
 
-        // calculated lbm forces to particles
+            // calculated lbm forces to particles
+
+        }
+
 
         // data output?
-        // TODO ensure that lbm forces can be dumped separately to the contact ones
+        if iter % dump_iter == 0 {
+            // TODO ensure that lbm forces can be dumped separately to the contact ones
+            // TODO use C-API for LIGGGHTS to dump
+
+            lbm.rho.write_device
+        }
+
 
 
         iter += n_iter;

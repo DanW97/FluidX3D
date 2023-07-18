@@ -13,7 +13,7 @@
 //#define FP16S // compress LBM DDFs to range-shifted IEEE-754 FP16; number conversion is done in hardware; all arithmetic is still done in FP32
 //#define FP16C // compress LBM DDFs to more accurate custom FP16C format; number conversion is emulated in software; all arithmetic is still done in FP32
 
-#define BENCHMARK // disable all extensions and setups and run benchmark setup instead
+//#define BENCHMARK // disable all extensions and setups and run benchmark setup instead
 
 //#define VOLUME_FORCE // enables global force per volume in one direction, specified in the LBM class constructor; the force can be changed on-the-fly between time steps at no performance cost
 //#define FORCE_FIELD // enables computing the forces on solid boundaries with lbm.calculate_force_on_boundaries(); and enables setting the force for each lattice point independently (enable VOLUME_FORCE too); allocates an extra 12 Bytes/node
@@ -85,6 +85,10 @@
 #ifdef PARTICLES // (rho, u) need to be updated exactly every LBM step
 #define UPDATE_FIELDS // update (rho, u, T) in every LBM step
 #endif // PARTICLES
+
+#ifdef DEM // (rho, u) need to be updated exactly every lbm timestep
+#define UPDATE_FIELDS
+#endif // DEM
 
 #if defined(INTERACTIVE_GRAPHICS) || defined(INTERACTIVE_GRAPHICS_ASCII)
 #define GRAPHICS

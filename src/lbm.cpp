@@ -108,6 +108,19 @@ void LBM_Domain::allocate(Device& device) {
 #endif // FORCE_FIELD
 #endif // PARTICLES
 
+#ifdef DEM
+    // TODO define methods to draw these values (in order) from LIGGGHTS
+    dem_positions = Memory<float>(device, (ulong)particles_N, 3u);
+    dem_ids = Memory<ulong>(device, (ulong)particles_N, 1u);
+    dem_radii = Memory<float>(device, (ulong)particles_N, 1u);
+    // these are zeroed before each coupling step
+    dem_force = Memory<float>(device, (ulong)particles_N, 3u, true, true, 0.0f);
+    dem_torque = Memory<float>(device, (ulong)particles_N, 3u, true, true, 0.0f);
+    // initialise arrays on GPU
+    kernel_initialize.add_parameters(dem_positions, dem_ids, dem_radii, dem_force, dem_torque);
+
+
+#endif // DEM
 	if(get_D()>1u) allocate_transfer(device);
 }
 
