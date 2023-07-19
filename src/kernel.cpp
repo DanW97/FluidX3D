@@ -1344,7 +1344,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // SURFACE
 
 
-
+// TODO add ifdef for DEM
 )+R(kernel void initialize)+"("+R(global fpxx* fi, const global float* rho, global float* u, global uchar* flags // ) { // initialize LBM
 )+"#ifdef SURFACE"+R(
 	, global float* mass, global float* massex, global float* phi // argument order is important
@@ -1450,7 +1450,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // MOVING_BOUNDARIES
 
 
-
+// TODO add coupling code
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important
@@ -1461,6 +1461,9 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef TEMPERATURE"+R(
 	, global fpxx* gi, global float* T // argument order is important
 )+"#endif"+R( // TEMPERATURE
+)+"#ifdef DEM"+R(
+	, const global float* dem_positions , const global ulong* dem_ids , const global float* dem_radii , const global float* dem_force , const global float* dem_torque // argument order is important
+)+"#endif"+R( // DEM
 )+") {"+R( // stream_collide()
 	const uint n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uint)def_N||is_halo(n)) return; // don't execute stream_collide() on halo
@@ -1600,6 +1603,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#endif"+R( // SUBGRID
 
+// TODO verify if this srt form is same as paper or need to shift things
 )+"#if defined(SRT)"+R(
 )+"#ifdef VOLUME_FORCE"+R(
 	const float c_tau = fma(w, -0.5f, 1.0f);
@@ -1799,6 +1803,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 } // possible types at the end of surface_3(): TYPE_F / TYPE_I / TYPE_G
 )+"#endif"+R( // SURFACE
 
+// TODO see if DEM code needed here
 )+R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important

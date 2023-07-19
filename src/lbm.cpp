@@ -118,7 +118,7 @@ void LBM_Domain::allocate(Device& device) {
     dem_torque = Memory<float>(device, (ulong)particles_N, 3u, true, true, 0.0f);
     // initialise arrays on GPU
     kernel_initialize.add_parameters(dem_positions, dem_ids, dem_radii, dem_force, dem_torque);
-
+	
 
 #endif // DEM
 	if(get_D()>1u) allocate_transfer(device);
@@ -602,10 +602,10 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 		particles = &(lbm[0]->particles);
 #endif // PARTICLES
 	} {
-#ifdef DEM // for now, adhere to the 
-		positions = &(lbm[0]->positions);
-		ids = &(lbm[0]->ids);
-		radii = &(lbm[0]->ids);		
+#ifdef DEM // TODO see if this needs to add anything else
+		dem_positions = &(lbm[0]->dem_positions);
+		dem_ids = &(lbm[0]->dem_ids);
+		dem_radii = &(lbm[0]->dem_radii);		
 #endif // DEM
 	}
 #ifdef GRAPHICS
