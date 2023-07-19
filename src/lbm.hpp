@@ -24,6 +24,7 @@ private:
 	float sigma=0.0f; // surface tension coefficient
 	float alpha=1.0f, beta=1.0f, T_avg=1.0f; // alpha = thermal diffusion coefficient, beta = thermal expansion coefficient, T_avg = 1 = average temperature
 	uint particles_N = 0u;
+    uint dem_particles_N = 0u;
 	float particles_rho = 1.0f;
 
 	Device device; // OpenCL device associated with this LBM domain
