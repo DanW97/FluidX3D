@@ -118,8 +118,7 @@ void LBM_Domain::allocate(Device& device) {
     dem_torque = Memory<float>(device, (ulong)dem_particles_N, 3u, true, true, 0.0f);
     // initialise arrays on GPU
     kernel_initialize.add_parameters(dem_positions, dem_ids, dem_radii, dem_force, dem_torque);
-    // TODO figure out needed args
-    kernel_integrate_dem_particles = Kernel(device, )
+    // TODO add parameters to stream_collide kernel
 
 #endif // DEM
 	if(get_D()>1u) allocate_transfer(device);

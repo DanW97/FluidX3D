@@ -1565,6 +1565,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // VOLUME_FORCE
 	}
 
+
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 )+"#ifdef UPDATE_FIELDS"+R(
 	rho[               n] = rhon; // update density field
@@ -1586,6 +1587,85 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float feq[def_velocity_set]; // equilibrium DDFs
 	calculate_f_eq(rhon, uxn, uyn, uzn, feq); // calculate equilibrium DDFs
 	float w = def_w; // LBM relaxation rate w = dt/tau = dt/(nu/c^2+dt/2) = 1/(3*nu+1/2)
+)+"#ifdef DEM"+R(
+	float Bns_omega_i[def_velocity_set]; // solid collision operator + coverage operator
+	float epsilon_ns[10]; // magic number sized vector for particle solid fractions
+	float Bns[10]; // magic number sized vector for coverage operator
+	uint local_ids[10]; // magic number sized vector for ids cutting cell
+	float Bn = 0.0f; // total coverage operator for cell
+	float epsilon_n = 0.0f; // total solid fraction for cell
+	// TODO check arg names passed to kernel with this function
+	// TODO see how i need to handle normalising radii
+	// this mutates epsilon_ns and local_ids but returns number of elements modified so we can work with 1:n_ids particles only
+	// TODO implement this function
+	uint n_ids = get_particles_cutting_cell(dem_ids, dem_radii, dem_positions, epsilon_ns, local_ids); 
+	const float tau_minus_half = 1.0f/w - 0.5f;
+
+	// need total epsilon for cell so can't merge this loop with the one below
+	for(uint i = 0u; i<n_ids; i++) {
+		Bn += epsilon_ns[i];
+		epsilon_n += epsilon_ns[i];
+	}
+	const float Bn_scaling = tau_minus_half / (1 - epsilon_n + tau_minus_half);
+	Bn *= Bn_scaling;
+	// epsilon and Bn are only defined on the interval [0.0, 1.0]
+	clamp(epsilon_n, 0.0f, 1.0f);
+	clamp(Bn, 0.0f, 1.0f);
+	// TODO see if this is defined for rest pop or not - i think it's only for ones with velocity
+	for (uint i = 1u; i<n_ids; i++){
+		// feq based on solid velocity
+		float feq_s = 
+		// solid collision operator
+		float omega_is = feq_s;
+		// collision operator * velocity components
+		float omega_e_i_x = 0.0f;
+		float omega_e_i_y = 0.0f;
+		float omega_e_i_z = 0.0f;
+		// apply scaling to Bns
+		Bns[i] *= Bn_scaling;
+		for (uint j = 0u; j<def_velocity_set; j++) {
+			// reverse index
+			uint j_reverse = 
+			float omega_is += fhn[j_reverse] - feq[j_reverse] - fhn[j]
+			// TODO get velocity component
+			// collision operator * velocity component of LBM lattice
+			float omega_e_i_x += omega_is * 
+			float omega_e_i_y += omega_is * 
+			float omega_e_i_z += omega_is * 
+			// update Bns_omega_i
+			Bns_omega_i[i] += Bns[j]*omega_is;
+		}
+		// multipliers for force summand
+		float force_summand = -Bns[i] * omega_is;
+		// TODO get x-component
+		float fx = force_summand *
+		// TODO get y-component
+		float fy = force_summand *
+		// TODO get z-component
+		float fz = force_summand * 
+
+		// position vector for lever
+		// TODO remember how to do this
+		float lever = 
+
+		float tx = cross(lever, fx);
+		float ty = cross(lever, fy);
+		float tz = cross(lever, fz);
+
+		// atomic ops as it is not promised that updating force and torque on particles
+		// that will in fact probably cutting many cells
+		// TODO verify that force and torque arrays look like this - [3, N]
+		// TODO long-term, see if atomic ops can be avoided
+		atomic_add_f(&dem_force[0, dem_ids[local_ids[i]]], fx);
+		atomic_add_f(&dem_force[1, dem_ids[local_ids[i]]], fy);
+		atomic_add_f(&dem_force[2, dem_ids[local_ids[i]]], fz);
+		
+		atomic_add_f(&dem_torque[0, dem_ids[local_ids[i]]], tx);
+		atomic_add_f(&dem_torque[1, dem_ids[local_ids[i]]], ty);
+		atomic_add_f(&dem_torque[2, dem_ids[local_ids[i]]], tz);
+
+	}
+
 
 )+"#ifdef SUBGRID"+R(
 	{ // Smagorinsky-Lilly subgrid turbulence model, source: https://arxiv.org/pdf/comp-gas/9401004.pdf, in the eq. below (26), it is "tau_0" not "nu_0", and "sqrt(2)/rho" (they call "rho" "n") is missing
@@ -1603,17 +1683,23 @@ string opencl_c_container() { return R( // ########################## begin of O
 	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#endif"+R( // SUBGRID
 
-// TODO verify if this srt form is same as paper or need to shift things
 )+"#if defined(SRT)"+R(
 )+"#ifdef VOLUME_FORCE"+R(
 	const float c_tau = fma(w, -0.5f, 1.0f);
 	for(uint i=0u; i<def_velocity_set; i++) Fin[i] *= c_tau;
 )+"#endif"+R( // VOLUME_FORCE
+)+"#ifdef DEM"+R(
+        w *= (1.0f - Bn); // rescale w according to coverage operator
+		for(uint i=0u; i<def_velocity_set; i++) Fin[i] *= (1.0f - Bn); // apply coverage operator to forces
+)+"#endif"+R( //DEM
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(1.0f-w, fhn[i], fma(w, feq[i], Fin[i])); // perform collision (SRT)
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = flagsn_bo==TYPE_E ? feq[i] : fma(1.0f-w, fhn[i], fma(w, feq[i], Fin[i])); // perform collision (SRT)
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
+)+"#ifdef DEM"+R(
+    for(uint i=0u; i<def_velocity_set; i++) fhn[i] += Bns_omega_i[i]; // include solid collision operator  
+)+"#endif"+R( //DEM
 )+"#elif defined(TRT)"+R(
 	const float wp = w; // TRT: inverse of "+" relaxation time
 	const float wm = 1.0f/(0.1875f/(1.0f/w-0.5f)+0.5f); // TRT: inverse of "-" relaxation time wm = 1.0f/(0.1875f/(3.0f*nu)+0.5f), nu = (1.0f/w-0.5f)/3.0f;

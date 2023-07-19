@@ -76,6 +76,7 @@ public:
 #endif // PARTICLES
 #ifdef DEM
 // TODO see if i need to include coupling frequency as part of the LBM class or not
+// TODO include extra array for the horrible f(r) function if permsort implemented
 	Memory<float> dem_positions; // dem particle positions
 	Memory<ulong> dem_ids; // dem particle ids
 	Memory<float> dem_radii; // dem particle radii
@@ -84,7 +85,9 @@ public:
     void reset_forces(); // sets arrays to zero before coupling step
     // transfer calculated forces to liggghts array
     // TODO see if i can directly write to the array or if i need a buffer
+	// TODO implement
     void transfer_force_to_host(const int* liggghts_force_array);
+	// TODO implement
     void transfer_torque_to_host(const int* liggghts_torque_array);
 
 
