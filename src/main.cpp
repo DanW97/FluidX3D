@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
         const char *cmd = cmd_string.c_str();
         lammps->input->one(cmd);
 
-        if iter % n_iter == 0 {
+        if (iter % n_iter == 0) {
             // particle positions to coverage collision operator
 
             // calculated lbm forces to particles
@@ -84,11 +84,11 @@ int main(int argc, char *argv[]) {
 
 
         // data output?
-        if iter % dump_iter == 0 {
+        if (iter % dump_iter == 0) {
             // TODO ensure that lbm forces can be dumped separately to the contact ones
             // TODO use C-API for LIGGGHTS to dump
 
-            lbm.rho.write_device
+            // lbm.rho.write_device
         }
 
 

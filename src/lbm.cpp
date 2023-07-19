@@ -603,10 +603,10 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 		particles = &(lbm[0]->particles);
 #endif // PARTICLES
 	} {
-#ifdef DEM // for now, adhere to the 
-		positions = &(lbm[0]->positions);
-		ids = &(lbm[0]->ids);
-		radii = &(lbm[0]->ids);		
+#ifdef DEM // TODO see if this needs to add anything else
+		dem_positions = &(lbm[0]->dem_positions);
+		dem_ids = &(lbm[0]->dem_ids);
+		dem_radii = &(lbm[0]->dem_radii);		
 #endif // DEM
 	}
 #ifdef GRAPHICS
