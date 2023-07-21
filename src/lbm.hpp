@@ -77,7 +77,7 @@ public:
 #ifdef DEM
 // TODO see if i need to include coupling frequency as part of the LBM class or not
 	Memory<float> dem_positions; // dem particle positions
-	Memory<ulong> dem_ids; // dem particle ids
+	Memory<uint> dem_ids; // dem particle ids
 	Memory<float> dem_radii; // dem particle radii
 	Memory<float> dem_velocity; // dem particle translational velocity
 	Memory<float> dem_omega; // dem particle rotational velocity
@@ -386,7 +386,7 @@ public:
 #ifdef DEM
 // TODO work out why everything else except particles aren't pointers
 	Memory<float>* dem_positions; // dem particle positions
-	Memory<ulong>* dem_ids; // dem particle ids
+	Memory<uint>* dem_ids; // dem particle ids
 	Memory<float>* dem_radii; // dem particle radii
 	Memory<float>* dem_velocity; // dem particle translational velocity
 	Memory<float>* dem_omega; // dem particle rotational velocity
