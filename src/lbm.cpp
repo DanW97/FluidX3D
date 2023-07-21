@@ -110,20 +110,25 @@ void LBM_Domain::allocate(Device& device) {
 
 #ifdef DEM
     // TODO define methods to draw these values (in order) from LIGGGHTS
-    dem_positions = Memory<float>(device, (ulong)dem_particles_N, 3u);
-    dem_ids = Memory<ulong>(device, (ulong)dem_particles_N, 1u);
-    dem_radii = Memory<float>(device, (ulong)dem_particles_N, 1u);
+    dem_positions = Memory<float>(device, (uint)dem_particles_N, 3u);
+    dem_ids = Memory<uint>(device, (uint)dem_particles_N, 1u);
+    dem_radii = Memory<float>(device, (uint)dem_particles_N, 1u);
+	dem_velocity = Memory<float>(device, (uint)dem_particles_N, 3u); 
+	dem_omega = Memory<float>(device, (uint)dem_particles_N, 3u); 
+	sphere_cap = Memory<float>(device, (uint)dem_particles_N, 1u); 
     // these are zeroed before each coupling step
-	// TODO ensure that zeroing is done before the coupling is performed
-    dem_force = Memory<float>(device, (ulong)dem_particles_N, 3u, true, true, 0.0f);
-    dem_torque = Memory<float>(device, (ulong)dem_particles_N, 3u, true, true, 0.0f);
+    dem_force = Memory<float>(device, (uint)dem_particles_N, 3u, true, true, 0.0f);
+    dem_torque = Memory<float>(device, (uint)dem_particles_N, 3u, true, true, 0.0f);
+	// zeroing kernel
+	kernel_reset_dem_forces = Kernel(device, N, "reset_dem_forces", dem_force, dem_torque);
     // initialise arrays on GPU
-    kernel_initialize.add_parameters(dem_positions, dem_ids, dem_radii, dem_force, dem_torque);
-    // TODO add parameters to stream_collide kernel
+    kernel_initialize.add_parameters(dem_positions, dem_ids, dem_radii, dem_velocity, dem_omega, sphere_cap, dem_force, dem_torque);
+	kernel_stream_collide.add_parameters(dem_positions, dem_ids, dem_radii, dem_velocity, dem_omega, sphere_cap, dem_force, dem_torque);
 
 #endif // DEM
 	if(get_D()>1u) allocate_transfer(device);
 }
+
 
 void LBM_Domain::enqueue_initialize() { // call kernel_initialize
 	kernel_initialize.enqueue_run();
@@ -604,9 +609,14 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 #endif // PARTICLES
 	} {
 #ifdef DEM // TODO see if this needs to add anything else
+		// TODO this will obviously need a rework if i decide to make multi-gpu work
 		dem_positions = &(lbm[0]->dem_positions);
 		dem_ids = &(lbm[0]->dem_ids);
-		dem_radii = &(lbm[0]->dem_radii);		
+		dem_radii = &(lbm[0]->dem_radii);
+		dem_velocity = &(lbm[0]->dem_velocity);
+		dem_omega = &(lbm[0]->dem_omega);
+		dem_force = &(lbm[0]->dem_force);
+		dem_torque = &(lbm[0]->dem_torque);
 #endif // DEM
 	}
 #ifdef GRAPHICS
@@ -970,6 +980,13 @@ void LBM::voxelize_stl(const string& path, const float3& center, const float siz
 void LBM::voxelize_stl(const string& path, const float size, const uchar flag) { // read and voxelize binary .stl file (place in box center, no rotation)
 	voxelize_stl(path, center(), float3x3(1.0f), size, flag);
 }
+
+#ifdef DEM
+void LBM::reset_coupling_forces() { // reset force and torques before applying coupling
+	if(get_D()==1u) lbm[0]->kernel_reset_dem_forces().enqueue_run();
+	// TODO see if i need to wait for queue to finish
+}
+#endif // DEM
 
 #ifdef GRAPHICS
 int* LBM::Graphics::draw_frame() {

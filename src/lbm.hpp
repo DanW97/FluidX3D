@@ -76,20 +76,16 @@ public:
 #endif // PARTICLES
 #ifdef DEM
 // TODO see if i need to include coupling frequency as part of the LBM class or not
-// TODO include extra array for the horrible f(r) function if permsort implemented
 	Memory<float> dem_positions; // dem particle positions
 	Memory<ulong> dem_ids; // dem particle ids
 	Memory<float> dem_radii; // dem particle radii
+	Memory<float> dem_velocity; // dem particle translational velocity
+	Memory<float> dem_omega; // dem particle rotational velocity
+	Memory<float> sphere_cap; // horrific integral used in epsilon linear approximation
     Memory<float> dem_force; // hydrodynamic force on dem particles
     Memory<float> dem_torque; // hydrodynamic torque on dem particles
-    void reset_forces(); // sets arrays to zero before coupling step
-    // transfer calculated forces to liggghts array
-    // TODO see if i can directly write to the array or if i need a buffer
-	// TODO implement
-    void transfer_force_to_host(const int* liggghts_force_array);
-	// TODO implement
-    void transfer_torque_to_host(const int* liggghts_torque_array);
 
+	Kernel kernel_reset_dem_forces;
 
 #endif // DEM
 
@@ -392,8 +388,18 @@ public:
 	Memory<float>* dem_positions; // dem particle positions
 	Memory<ulong>* dem_ids; // dem particle ids
 	Memory<float>* dem_radii; // dem particle radii
+	Memory<float>* dem_velocity; // dem particle translational velocity
+	Memory<float>* dem_omega; // dem particle rotational velocity
+	Memory<float>* sphere_cap; // horrific integral used in epsilon linear approximation
     Memory<float>* dem_force; // hydrodynamic force on dem particles
     Memory<float>* dem_torque; // hydrodynamic torque on dem particles
+	void reset_coupling_forces();
+	// transfer calculated forces to liggghts array
+    // TODO see if i can directly write to the array or if i need a buffer
+	// TODO implement
+    void send_force_data(const LAMMPS_NS::LAMMPS* liggghts);
+	// TODO implement
+	void receive_liggghts_data(const LAMMPS_NS::LAMMPS* liggghts);
 #endif // DEM
 
 	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=0.0f); // compiles OpenCL C code and allocates memory
