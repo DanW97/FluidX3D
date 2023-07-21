@@ -114,6 +114,7 @@ void LBM_Domain::allocate(Device& device) {
     dem_ids = Memory<ulong>(device, (ulong)dem_particles_N, 1u);
     dem_radii = Memory<float>(device, (ulong)dem_particles_N, 1u);
     // these are zeroed before each coupling step
+	// TODO ensure that zeroing is done before the coupling is performed
     dem_force = Memory<float>(device, (ulong)dem_particles_N, 3u, true, true, 0.0f);
     dem_torque = Memory<float>(device, (ulong)dem_particles_N, 3u, true, true, 0.0f);
     // initialise arrays on GPU

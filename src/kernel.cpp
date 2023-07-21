@@ -1613,6 +1613,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	clamp(Bn, 0.0f, 1.0f);
 	// TODO see if this is defined for rest pop or not - i think it's only for ones with velocity
 	for (uint i = 1u; i<n_ids; i++){
+		uint particle_id = dem_ids[local_ids[i]];
 		// feq based on solid velocity
 		float feq_s = 
 		// solid collision operator
@@ -1637,33 +1638,28 @@ string opencl_c_container() { return R( // ########################## begin of O
 		}
 		// multipliers for force summand
 		float force_summand = -Bns[i] * omega_is;
-		// TODO get x-component
-		float fx = force_summand *
-		// TODO get y-component
-		float fy = force_summand *
-		// TODO get z-component
-		float fz = force_summand * 
-
+		float fx = force_summand * omega_e_i_x;
+		float fy = force_summand * omega_e_i_y;
+		float fz = force_summand * omega_e_i_z;
 		// position vector for lever
-		// TODO remember how to do this
-		float lever = 
-
-		float tx = cross(lever, fx);
-		float ty = cross(lever, fy);
-		float tz = cross(lever, fz);
-
+		// particle postion - node position
+		// TODO verify position array shape
+		float lever_x = dem_positions[0, particle_id] - ;
+		float lever_y = dem_positions[1, particle_id] - ;
+		float lever_z = dem_positions[2, particle_id] - ;
+		float tx = lever_y * fz - lever_z * fy; 
+		float ty = lever_z * fx - lever_x * fz;
+		float tz = lever_x * fy - lever_y * fy;
 		// atomic ops as it is not promised that updating force and torque on particles
 		// that will in fact probably cutting many cells
-		// TODO verify that force and torque arrays look like this - [3, N]
+		// TODO verify that force and torque arrays look like this - [3, N] - it may be that we have to do particle_id, particle_id + def_n, particle_id + 2*def_N if they are just long vectors
 		// TODO long-term, see if atomic ops can be avoided
-		atomic_add_f(&dem_force[0, dem_ids[local_ids[i]]], fx);
-		atomic_add_f(&dem_force[1, dem_ids[local_ids[i]]], fy);
-		atomic_add_f(&dem_force[2, dem_ids[local_ids[i]]], fz);
-		
-		atomic_add_f(&dem_torque[0, dem_ids[local_ids[i]]], tx);
-		atomic_add_f(&dem_torque[1, dem_ids[local_ids[i]]], ty);
-		atomic_add_f(&dem_torque[2, dem_ids[local_ids[i]]], tz);
-
+		atomic_add_f(&dem_force[0, particle_id], fx);
+		atomic_add_f(&dem_force[1, particle_id], fy);
+		atomic_add_f(&dem_force[2, particle_id], fz);
+		atomic_add_f(&dem_torque[0, particle_id], tx);
+		atomic_add_f(&dem_torque[1, particle_id], ty);
+		atomic_add_f(&dem_torque[2, particle_id], tz);
 	}
 
 
