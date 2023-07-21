@@ -1,3 +1,4 @@
+#pragma once
 // LIGGGHTS
 #include "lammps.h"
 #include <mpi.h>
@@ -11,21 +12,13 @@
 #include "lbm.hpp"
 #include "setup.hpp"
 
-#include "coupling.hpp"
-
-// do setup in here
-void lbm_setup() {
-	info.print_logo();
-	// TODO 
-	// running = false;
-	exit(0); // make sure that the program stops
+#ifdef DEM
+void main_physics(LAMMPS_NS::LAMMPS* lammps) {
+        info.print_logo();
+        main_setup(lammps); // execute setup
+        running = false;
+        exit(0); // make sure that the program stops
 }
-
-// write in here what constitutes an lbm iteration
-void lbm_iteration(int n_iter) {
-
-}
-
 int main(int argc, char *argv[]) {
     // TODO separate args for liggghts and fluidx3d (device id)
     struct sigaction int_action, usr1_action, term_action;
@@ -43,59 +36,32 @@ int main(int argc, char *argv[]) {
 
     // read in LIGGGHTS file and create liggghts object
     MPI_Init(&argc, &argv);
-
-    LAMMPS_NS::LAMMPS *lammps = new LAMMPS_NS::LAMMPS(argc, argv, MPI_COMM_WORLD);
-    // LBM setup and create lbm object
-
-    // TODO ensure that only 1 host rank uses fluidx3d
-    // initial iteration
-    thread fx3d_thread(lbm_setup);
-	info.print_update();
-    lammps -> input -> file();
-    // blocking call for fx3d
-	fx3d_thread.join();
-
-    //  particle positions to coverage collision operator
-
-    //  calculated forces to particles
-
-    // TODO have some nice definition for this that allows
-    // lbm and dem to sync
-    const uint n_iters = 1000;
-    const uint n_iter = 10;
-    const uint dump_iter = 100;
-    // main loop
-    uint iter = 0;
-    while (iter <= n_iters) {
-        // lbm
-        // TODO see if the thread needs to be wrapped up in mpi or not
-        thread fx3d_thread(lbm_iteration, n_iter);
-        // dem
-        const std::string cmd_string = "run "+std::to_string(n_iter);
-        const char *cmd = cmd_string.c_str();
-        lammps->input->one(cmd);
-
-        if (iter % n_iter == 0) {
-            // particle positions to coverage collision operator
-
-            // calculated lbm forces to particles
-
-        }
-
-
-        // data output?
-        if (iter % dump_iter == 0) {
-            // TODO ensure that lbm forces can be dumped separately to the contact ones
-            // TODO use C-API for LIGGGHTS to dump
-
-            // lbm.rho.write_device
-        }
-
-
-
-        iter += n_iter;
-    }
-
-
-	return 0;
+    const LAMMPS_NS::LAMMPS *lammps = new LAMMPS_NS::LAMMPS(argc, argv, MPI_COMM_WORLD);
+    // main_arguments = get_main_arguments(argc, argv);
+    thread compute_thread(main_physics, lammps);
+    do { // main console loop
+            info.print_update();
+            sleep(0.050);
+    } while(running);
+    compute_thread.join();
+    return 0;
 }
+#else
+void main_physics() {
+        info.print_logo();
+        main_setup(); // execute setup
+        running = false;
+        exit(0); // make sure that the program stops
+}
+int main(int argc, char* argv[]) {
+        main_arguments = get_main_arguments(argc, argv);
+        thread compute_thread(main_physics());
+        do { // main console loop
+                info.print_update();
+                sleep(0.050);
+        } while(running);
+        compute_thread.join();
+        return 0;
+}
+#endif // DEM
+
