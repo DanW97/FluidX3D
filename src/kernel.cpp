@@ -876,8 +876,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	};
 	return c[i];
 }
-// TODO i have changed the name to avoid shadowing with a w variable - see if this breaks anything
-)+R(float weights(const uint i) { // avoid constant keyword by encapsulating data in function which gets inlined by compiler
+)+R(float w(const uint i) { // avoid constant keyword by encapsulating data in function which gets inlined by compiler
 	const float w[def_velocity_set] = { def_w0, // velocity set weights
 )+"#if defined(D2Q9)"+R(
 		def_ws, def_ws, def_ws, def_ws, def_we, def_we, def_we, def_we
@@ -1345,7 +1344,6 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // SURFACE
 
 
-// TODO add ifdef for DEM
 )+R(kernel void initialize)+"("+R(global fpxx* fi, const global float* rho, global float* u, global uchar* flags // ) { // initialize LBM
 )+"#ifdef SURFACE"+R(
 	, global float* mass, global float* massex, global float* phi // argument order is important
@@ -1450,8 +1448,6 @@ string opencl_c_container() { return R( // ########################## begin of O
 } // update_moving_boundaries()
 )+"#endif"+R( // MOVING_BOUNDARIES
 
-
-// TODO add coupling code
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important
@@ -1463,7 +1459,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	, global fpxx* gi, global float* T // argument order is important
 )+"#endif"+R( // TEMPERATURE
 )+"#ifdef DEM"+R(
-	, const global float* dem_positions, const global ulong* dem_ids, const global float* dem_radii, const global float* dem_velocity, const global float* dem_omega, const global float* sphere_cap, const global float* dem_force, const global float* dem_torque // argument order is important
+	, const global float* dem_positions, const global uint* dem_ids, const global float* dem_radii, const global float* dem_velocity, const global float* dem_omega, const global float* sphere_cap, const global float* dem_force, const global float* dem_torque // argument order is important
 )+"#endif"+R( // DEM
 )+") {"+R( // stream_collide()
 	const uint n = get_global_id(0); // n = x+(y+z*Ny)*Nx
@@ -1589,88 +1585,101 @@ string opencl_c_container() { return R( // ########################## begin of O
 	calculate_f_eq(rhon, uxn, uyn, uzn, feq); // calculate equilibrium DDFs
 	float w = def_w; // LBM relaxation rate w = dt/tau = dt/(nu/c^2+dt/2) = 1/(3*nu+1/2)
 )+"#ifdef DEM"+R(
-	// TODO implement check for when to couple
-	// forces should be reset before calling lbm.run(). Failure to do so is your own stupid
-	// fault, Dan.
-	float Bns_omega_i[def_velocity_set]; // solid collision operator + coverage operator
-	float epsilon_ns[10]; // magic number sized vector for particle solid fractions
-	float Bns[10]; // magic number sized vector for coverage operator
-	uint local_ids[10]; // magic number sized vector for ids cutting cell
-	float Bn = 0.0f; // total coverage operator for cell
-	float epsilon_n = 0.0f; // total solid fraction for cell
-	// TODO see how i need to handle normalising radii
-	// this mutates epsilon_ns and local_ids but returns number of elements modified so we can work with 1:n_ids particles only
-	// TODO implement this function
-	uint n_ids = get_particles_cutting_cell(dem_ids, dem_radii, dem_positions, epsilon_ns, local_ids); 
-	const float tau_minus_half = 1.0f/w - 0.5f;
-
-	// need total epsilon for cell so can't merge this loop with the one below
-	for(uint i = 0u; i<n_ids; i++) {
-		Bn += epsilon_ns[i];
-		epsilon_n += epsilon_ns[i];
-	}
-	const float Bn_scaling = tau_minus_half / (1 - epsilon_n + tau_minus_half);
-	Bn *= Bn_scaling;
-	// epsilon and Bn are only defined on the interval [0.0, 1.0]
-	clamp(epsilon_n, 0.0f, 1.0f);
-	clamp(Bn, 0.0f, 1.0f);
-	for (uint i = 0u; i<n_ids; i++){
-		uint particle_id = dem_ids[local_ids[i]];
-		// position vector for lever
-		// particle postion - node position
-		float lever_x = dem_positions[particle_id                     ] - ;
-		float lever_y = dem_positions[particle_id +    dem_particles_N] - ;
-		float lever_z = dem_positions[particle_id + 2u*dem_particles_N] - ;
-		// particle rotational velocity
-		float wx = dem_omega[particle_id                     ];
-		float wy = dem_omega[particle_id +    dem_particles_N];
-		float wz = dem_omega[particle_id + 2u*dem_particles_N];
-		// total particle velocity, taken from https://www.sciencedirect.com/science/article/pii/S0032591022004508#bb0185
-		// TODO see if not doing this a la https://arxiv.org/ftp/arxiv/papers/1901/1901.09745.pdf impacts results
-		float vx = dem_velocity[particle_id                     ] + lever_y * wz - lever_z * wy; 
-		float vy = dem_velocity[particle_id +    dem_particles_N] + lever_z * wx - lever_x * wz; 
-		float vz = dem_velocity[particle_id + 2u*dem_particles_N] + lever_x * wy - lever_y * wx; 
-		// feq based on solid velocity
-		float feq_s = 
-		// solid collision operator
-		float omega_is = feq_s;
-		// collision operator * velocity components
-		float omega_e_i_x = 0.0f;
-		float omega_e_i_y = 0.0f;
-		float omega_e_i_z = 0.0f;
-		// apply scaling to Bns
-		Bns[i] *= Bn_scaling;
-		// TODO see if the split PSM scheme is needed via observing any checkerboarding effects in a flow over a sphere scenario: https://www.sciencedirect.com/science/article/pii/S0032591022004508#bb0185
-		// TODO see if this is defined for rest pop or not - i think it's only for ones with velocity
-		for (uint j = 1u; j<def_velocity_set; j++) {
-			// reverse index
-			uint j_reverse = 
-			float omega_is += fhn[j_reverse] - feq[j_reverse] - fhn[j]
-			// collision operator * velocity component of LBM lattice
-			// TODO make sure that speed of sound * sqrt(3) cancelling to 1 works for this scheme
-			float omega_e_i_x += omega_is * velocity_set[j                     ];
-			float omega_e_i_y += omega_is * velocity_set[j +    dem_particles_N];
-			float omega_e_i_z += omega_is * velocity_set[j + 2u*dem_particles_N];
-			// update Bns_omega_i
-			Bns_omega_i[i] += Bns[j]*omega_is;
+	// Resetting of forces happens in setup.cpp, Dan, you've forgotten at least once that the
+	// reset is a kernel applied to all particles, calling inside here makes no sense you moron!
+	if (t % def_coupling_frequency == 0) { // only springs into action during the need to couple
+		float Bns_omega_i[def_velocity_set]; // solid collision operator + coverage operator
+		float epsilon_ns[10]; // magic number sized vector for particle solid fractions
+		float Bns[10]; // magic number sized vector for coverage operator
+		uint local_ids[10]; // magic number sized vector for ids cutting cell
+		float Bn = 0.0f; // total coverage operator for cell
+		float epsilon_n = 0.0f; // total solid fraction for cell
+		// TODO see how i need to handle normalising radii
+		// this mutates epsilon_ns and local_ids but returns number of elements modified so we can work with 1:n_ids particles only
+		uint n_ids = get_particles_cutting_cell(n, dem_ids, dem_radii, dem_positions, sphere_cap epsilon_ns, local_ids); 
+		const float tau_minus_half = 1.0f/w - 0.5f;
+		// need total epsilon for cell so can't merge this loop with the one below
+		for(uint i = 0u; i<n_ids; i++) {
+			Bn += epsilon_ns[i];
+			epsilon_n += epsilon_ns[i];
 		}
-		// multipliers for force summand
-		float force_summand = -Bns[i] * omega_is;
-		float fx = force_summand * omega_e_i_x;
-		float fy = force_summand * omega_e_i_y;
-		float fz = force_summand * omega_e_i_z;
-		float tx = lever_y * fz - lever_z * fy; 
-		float ty = lever_z * fx - lever_x * fz;
-		float tz = lever_x * fy - lever_y * fx;
-		// atomic ops as it is not promised that updating force and torque on particles
-		// that will in fact probably cutting many cells
-		// TODO long-term, see if atomic ops can be avoided
-		atomic_add_f( &dem_force[particle_id                     ], fx);
-		atomic_add_f( &dem_force[particle_id +    dem_particles_N], fy);
-		atomic_add_f (&dem_force[particle_id + 2u*dem_particles_N], fz);
-		atomic_add_f(&dem_torque[particle_id                     ], tx);
-		atomic_add_f(&dem_torque[particle_id +    dem_particles_N], ty);
-		atomic_add_f(&dem_torque[particle_id + 2u*dem_particles_N], tz);
+		const float Bn_scaling = tau_minus_half / (1 - epsilon_n + tau_minus_half);
+		Bn *= Bn_scaling;
+		// epsilon and Bn are only defined on the interval [0.0, 1.0]
+		clamp(epsilon_n, 0.0f, 1.0f);
+		clamp(Bn, 0.0f, 1.0f);
+		// feq based on solid velocity
+		float feq_s[def_velocity_set];
+		for (uint i = 0u; i<n_ids; i++){
+			uint particle_id = dem_ids[local_ids[i]];
+			// position vector for lever
+			// particle postion - node position
+			float3 node_position = position(n);
+			float lever_x = dem_positions[particle_id                         ] - node_position.x;
+			float lever_y = dem_positions[particle_id +    def_dem_particles_N] - node_position.y;
+			float lever_z = dem_positions[particle_id + 2u*def_dem_particles_N] - node_position.z;
+			// particle rotational velocity
+			float wx = dem_omega[particle_id                         ];
+			float wy = dem_omega[particle_id +    def_dem_particles_N];
+			float wz = dem_omega[particle_id + 2u*def_dem_particles_N];
+			// total particle velocity, taken from https://www.sciencedirect.com/science/article/pii/S0032591022004508#bb0185
+			// TODO see if not doing this a la https://arxiv.org/ftp/arxiv/papers/1901/1901.09745.pdf impacts results
+			float vx = dem_velocity[particle_id                         ] + lever_y * wz - lever_z * wy; 
+			float vy = dem_velocity[particle_id +    def_dem_particles_N] + lever_z * wx - lever_x * wz; 
+			float vz = dem_velocity[particle_id + 2u*def_dem_particles_N] + lever_x * wy - lever_y * wx; 
+			// use solid velocities for f_eq
+			calculate_f_eq(rhon, vx, vt, vz, feq_s);
+			// collision operator * velocity components
+			float omega_e_i_x = 0.0f;
+			float omega_e_i_y = 0.0f;
+			float omega_e_i_z = 0.0f;
+			// apply scaling to Bns
+			Bns[i] *= Bn_scaling;
+			// TODO see if the split PSM scheme is needed via observing any checkerboarding effects in a flow over a sphere scenario: https://www.sciencedirect.com/science/article/pii/S0032591022004508#bb0185
+			// TODO see if this is defined for rest pop or not - i think it's only for ones with velocity
+			// Don't need rest population, this takes us up to index def_velocity_set - 1,
+			// i.e. the end of the population array by performing collision operator calculations
+			// for both the current even index and also the odd one before.
+			for (uint j = 2u; j<def_velocity_set; j+=2u) { 
+				// reverse (odd) direction index
+				uint j_reverse = def_velocity_set - 1u; // reversed directions are at odd numbers
+				// solid collision operator
+				float omega_is = feq_s[j] - feq[j_reverse] + fhn[j_reverse] - fhn[j];
+				// collision operator * velocity component of LBM lattice
+				// TODO make sure that speed of sound * sqrt(3) cancelling to 1 works for this scheme
+				float omega_e_i_x += omega_is * velocity_set[j                         ];
+				float omega_e_i_y += omega_is * velocity_set[j +    def_dem_particles_N];
+				float omega_e_i_z += omega_is * velocity_set[j + 2u*def_dem_particles_N];
+				// update Bns_omega_i
+				Bns_omega_i[j] = Bns[i]*omega_is;
+				// repeat for reversed direction (odd index)
+				float omega_is = feq_s[j_reverse] - feq[j] + fhn[j] - fhn[j_reverse];
+				// collision operator * velocity component of LBM lattice
+				// TODO make sure that speed of sound * sqrt(3) cancelling to 1 works for this scheme
+				float omega_e_i_x += omega_is * velocity_set[j_reverse                         ];
+				float omega_e_i_y += omega_is * velocity_set[j_reverse +    def_dem_particles_N];
+				float omega_e_i_z += omega_is * velocity_set[j_reverse + 2u*def_dem_particles_N];
+				// update Bns_omega_i
+				Bns_omega_i[j_reversed] = Bns[i]*omega_is;
+			}
+			// Hydrodynamic force
+			float fx = -Bns[i] * omega_e_i_x;
+			float fy = -Bns[i] * omega_e_i_y;
+			float fz = -Bns[i] * omega_e_i_z;
+			// Hydrodynamic torque, inline cross product r x F
+			float tx = lever_y * fz - lever_z * fy; 
+			float ty = lever_z * fx - lever_x * fz;
+			float tz = lever_x * fy - lever_y * fx;
+			// atomic ops as it is not promised that updating force and torque on particles
+			// that will in fact probably cutting many cells
+			// TODO long-term, see if atomic ops can be avoided
+			atomic_add_f( &dem_force[particle_id                     ], fx);
+			atomic_add_f( &dem_force[particle_id +    def_dem_particles_N], fy);
+			atomic_add_f (&dem_force[particle_id + 2u*def_dem_particles_N], fz);
+			atomic_add_f(&dem_torque[particle_id                     ], tx);
+			atomic_add_f(&dem_torque[particle_id +    def_dem_particles_N], ty);
+			atomic_add_f(&dem_torque[particle_id + 2u*def_dem_particles_N], tz);
+		}
 	}
 )+"#endif"+R(
 )+"#ifdef SUBGRID"+R(
@@ -1695,8 +1704,10 @@ string opencl_c_container() { return R( // ########################## begin of O
 	for(uint i=0u; i<def_velocity_set; i++) Fin[i] *= c_tau;
 )+"#endif"+R( // VOLUME_FORCE
 )+"#ifdef DEM"+R(
-        w *= (1.0f - Bn); // rescale w according to coverage operator
-		for(uint i=0u; i<def_velocity_set; i++) Fin[i] *= (1.0f - Bn); // apply coverage operator to forces
+		if (t % coupling_frequency == 0) { // only needed during coupling phase
+			w *= (1.0f - Bn); // rescale w according to coverage operator
+			for(uint i=0u; i<def_velocity_set; i++) Fin[i] *= (1.0f - Bn); // apply coverage operator to forces
+		}
 )+"#endif"+R( //DEM
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(1.0f-w, fhn[i], fma(w, feq[i], Fin[i])); // perform collision (SRT)
@@ -1738,7 +1749,33 @@ string opencl_c_container() { return R( // ########################## begin of O
 
 	store_f(n, fhn, fi, j, t); // perform streaming (part 1)
 } // stream_collide()
+)+"#ifdef DEM"+R(
+)+R(uint get_particles_cutting_cell(uint n, const global float* dem_positions, const global uint* dem_ids, const global float* dem_radii, const global float* sphere_cap, float epsilon_ns, uint local_ids) {
+	uint particle_count = 0;
+	float3 node_position = position(n);
+	const float h = 1.0f; // spherical shell parameter - cells inside this range use linear approximation
+	// The LBM box is defined from [-Nx/2, Nx/2] x [-Ny/2, Ny/2] x [-Nz/2, Nz/2]
+	for (uint i = 0u; i<def_dem_particles_N; i++){
+		float3 particle_position = float3(dem_positions[i], dem_positions[i+def_dem_particles_N],dem_positions[i+2u*def_dem_particles_N]);
+		float particle_radius = dem_radii[i];
+		float particle_distance = distance(node_position, particle_position);
+		if (particle_distance >= (particle_radius + h)){ // calculate solid fraction and add id
+			epsilon_ns[particle_count] = 1.0f; // particle fully covers cell
+			local_ids[particle_count] = dem_ids[i]; // add id
+			particle_count += 1u; // increment counter
+		}
+		else if (particle_distance > (particle_radius - h)) {
+			float D = particle_distance - particle_radius;
+			// TODO confirm that lbm units radii are further normalised by the grid spacing
+			epsilon_ns[particle_count] = -D + particle_radius / dx + sphere_cap[i];
+			local_ids[particle_count] = dem_ids[i]; // add id
+			particle_count += 1u; // increment counter
+		} // do nothing if distance <= (radius - h)
+	}
 
+	return particle_count
+}
+)+"#endif"+R( // DEM
 )+"#ifdef SURFACE"+R(
 )+R(kernel void surface_0(global fpxx* fi, const global float* rho, const global float* u, const global uchar* flags, global float* mass, const global float* massex, const global float* phi, const ulong t, const float fx, const float fy, const float fz) { // capture outgoing DDFs before streaming
 	const uint n = get_global_id(0); // n = x+(y+z*Ny)*Nx
@@ -2003,16 +2040,16 @@ string opencl_c_container() { return R( // ########################## begin of O
 	F[2ul*def_N+(ulong)n] = 0.0f;
 } // reset_force_field()
 )+"ifdef DEM"+R(kernel void reset_dem_forces(global float* F, global float* T){ // reset dem force and torques before recalculation
-	const uint n = get_global_id(0);
-	if(n>=(uint)dem_particles_N) return;
-	F[                         n] = 0.0f;
-	F[   dem_particles_N+(uint)n] = 0.0f;
-	F[2u*dem_particles_N+(uint)n] = 0.0f;
-	T[                         n] = 0.0f;
-	T[   dem_particles_N+(uint)n] = 0.0f;
-	T[2u*dem_particles_N+(uint)n] = 0.0f;
+	const uint n = get_global_id(0); // n = x+(y+z*Ny)*Nx
+	if(n>=(uint)def_dem_particles_N) return;
+	F[                             n] = 0.0f;
+	F[   def_dem_particles_N+(uint)n] = 0.0f;
+	F[2u*def_dem_particles_N+(uint)n] = 0.0f;
+	T[                             n] = 0.0f;
+	T[   def_dem_particles_N+(uint)n] = 0.0f;
+	T[2u*def_dem_particles_N+(uint)n] = 0.0f;
 
-} // reset_dem_forces
+} // reset_dem_forces()
 )+R(void spread_force(volatile global float* F, const float3 p, const float3 Fn) {
 	const float xa=p.x-0.5f+1.5f*def_Nx, ya=p.y-0.5f+1.5f*def_Ny, za=p.z-0.5f+1.5f*def_Nz; // subtract lattice offsets
 	const uint xb=(uint)xa, yb=(uint)ya, zb=(uint)za; // integer casting to find bottom left corner

@@ -5,6 +5,7 @@
 #include "graphics.hpp"
 #include "units.hpp"
 #include "info.hpp"
+#include "lammps.h"
 
 string default_filename(const string& path, const string& name, const string& extension, const ulong t); // generate a default filename with timestamp
 string default_filename(const string& name, const string& extension, const ulong t); // generate a default filename with timestamp at exe_path/export/
@@ -26,7 +27,7 @@ private:
 	uint particles_N = 0u;
     uint dem_particles_N = 0u;
 	float particles_rho = 1.0f;
-
+	uint coupling_frequency = 0u;
 	Device device; // OpenCL device associated with this LBM domain
 	Kernel kernel_initialize; // initialization kernel
 	Kernel kernel_stream_collide; // main LBM kernel
@@ -75,7 +76,6 @@ public:
 	Memory<float> particles; // particle positions
 #endif // PARTICLES
 #ifdef DEM
-// TODO see if i need to include coupling frequency as part of the LBM class or not
 	Memory<float> dem_positions; // dem particle positions
 	Memory<uint> dem_ids; // dem particle ids
 	Memory<float> dem_radii; // dem particle radii
@@ -140,9 +140,9 @@ public:
 	float get_beta() const { return beta; } // get thermal expansion coefficient
 	ulong get_t() const { return t; } // get discrete time step in LBM units
 	uint get_velocity_set() const; // get LBM velocity set
-	void set_fx(const float fx) { this->fx = fx; } // set global froce per volume
-	void set_fy(const float fy) { this->fy = fy; } // set global froce per volume
-	void set_fz(const float fz) { this->fz = fz; } // set global froce per volume
+	void set_fx(const float fx) { this->fx = fx; } // set global force per volume
+	void set_fy(const float fy) { this->fy = fy; } // set global force per volume
+	void set_fz(const float fz) { this->fz = fz; } // set global force per volume
 	void set_f(const float fx, const float fy, const float fz) { set_fx(fx); set_fy(fy); set_fz(fz); } // set global froce per volume
 
 	void voxelize_mesh_on_device(const Mesh* mesh, const uchar flag=TYPE_S, const float3& rotation_center=float3(0.0f), const float3& linear_velocity=float3(0.0f), const float3& rotational_velocity=float3(0.0f)); // voxelize mesh
@@ -214,7 +214,11 @@ private:
 
 	void sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho); // sanity checks on grid resolution and extension support
 	void sanity_checks_initialization(); // sanity checks during initialization on used extensions based on used flags
-	void initialize(); // write all data fields to device and call kernel_initialize
+	#ifdef DEM // write all data fields to device and call kernel_initialize
+		void initialize(const LAMMPS_NS::LAMMPS* liggghts); // if DEM enabled, need LIGGGHTS pointer during initialisation
+	#else
+		void initialize();
+	#endif // DEM
 	void do_time_step(); // call kernel_stream_collide to perform one LBM time step
 
 	void communicate_field(const enum_transfer_field field, const uint bytes_per_cell);
@@ -385,6 +389,7 @@ public:
 #endif // PARTICLES
 #ifdef DEM
 // TODO work out why everything else except particles aren't pointers
+// TODO if i need a buffer, maintain it here
 	Memory<float>* dem_positions; // dem particle positions
 	Memory<uint>* dem_ids; // dem particle ids
 	Memory<float>* dem_radii; // dem particle radii
@@ -397,9 +402,18 @@ public:
 	// transfer calculated forces to liggghts array
     // TODO see if i can directly write to the array or if i need a buffer
 	// TODO implement
+	// REMEMBER TO CONVERT UNITS
+	// TODO we may need to be aware of the liggghts sim box dimensions for position
     void send_force_data(const LAMMPS_NS::LAMMPS* liggghts);
 	// TODO implement
+	// REMEMBER TO CONVERT UNITS
+	// TODO we may need to be aware of the liggghts sim box dimensions for position
 	void receive_liggghts_data(const LAMMPS_NS::LAMMPS* liggghts);
+	// TODO implement
+	// This is only called at t = 0 to perform the initial copy over and calculation of f(r)
+	// REMEMBER TO CONVERT UNITS
+	// TODO we may need to be aware of the liggghts sim box dimensions for position
+	void initialise_from_liggghts(const LAMMPS_NS::LAMMPS* liggghts);
 #endif // DEM
 
 	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=0.0f); // compiles OpenCL C code and allocates memory

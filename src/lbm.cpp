@@ -2,7 +2,6 @@
 #include "graphics.hpp"
 
 
-
 Units units; // for unit conversion
 
 #if defined(D2Q9)
@@ -254,6 +253,7 @@ void LBM_Domain::enqueue_unvoxelize_mesh_on_device(const Mesh* mesh, const uchar
 	kernel_unvoxelize_mesh.run();
 }
 
+
 string LBM_Domain::device_defines() const { return
 	"\n	#define def_Nx "+to_string(Nx)+"u"
 	"\n	#define def_Ny "+to_string(Ny)+"u"
@@ -382,6 +382,12 @@ string LBM_Domain::device_defines() const { return
 	"\n	#define def_particles_N "+to_string(particles_N)+"ul"
 	"\n	#define def_particles_rho "+to_string(particles_rho)+"f"
 #endif // PARTICLES
+
+#ifdef DEM
+	"\n #define DEM"
+	"\n #define def_dem_particles_N "+to_string(dem_particles_N)+"u"
+	"\n #define def_coupling_frequency"+to_string(coupling_frequency)+"ul";
+#endif // DEM
 ;}
 
 #ifdef GRAPHICS
@@ -561,13 +567,16 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const uint
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint particles_N, const float particles_rho)
 	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, particles_N, particles_rho) { // delegating constructor
 }
-LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) { // multiple devices
+LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint dem_particles_N, const uint coupling_frequency) 
+	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, 0u, 0.0f, dem_particles_N, coupling_frequency) { // delegating constructor
+}
+LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho, const uint dem_particles_N, const uint coupling_frequency) { // multiple devices
 	this->Nx = Nx; this->Ny = Ny; this->Nz = Nz;
 	this->Dx = Dx; this->Dy = Dy; this->Dz = Dz;
 	const uint D = Dx*Dy*Dz;
 	const uint Hx=Dx>1u, Hy=Dy>1u, Hz=Dz>1u; // halo offsets
 	const vector<Device_Info>& device_infos = smart_device_selection(D);
-	sanity_checks_constructor(device_infos, Nx, Ny, Nz, Dx, Dy, Dz, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho);
+	sanity_checks_constructor(device_infos, Nx, Ny, Nz, Dx, Dy, Dz, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho, dem_particles_N, coupling_frequency);
 	lbm = new LBM_Domain*[D];
 	for(uint d=0u; d<D; d++) { // { thread* threads=new thread[D]; for(uint d=0u; d<D; d++) threads[d]=thread([=]() {
 		const uint x=((uint)d%(Dx*Dy))%Dx, y=((uint)d%(Dx*Dy))/Dx, z=(uint)d/(Dx*Dy); // d = x+(y+z*Dy)*Dx
@@ -608,15 +617,16 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 		particles = &(lbm[0]->particles);
 #endif // PARTICLES
 	} {
-#ifdef DEM // TODO see if this needs to add anything else
-		// TODO this will obviously need a rework if i decide to make multi-gpu work
-		dem_positions = &(lbm[0]->dem_positions);
-		dem_ids = &(lbm[0]->dem_ids);
-		dem_radii = &(lbm[0]->dem_radii);
-		dem_velocity = &(lbm[0]->dem_velocity);
-		dem_omega = &(lbm[0]->dem_omega);
-		dem_force = &(lbm[0]->dem_force);
-		dem_torque = &(lbm[0]->dem_torque);
+#ifdef DEM 
+	// This will obviously need a rework if i decide to make multi-gpu work
+	dem_positions = &(lbm[0]->dem_positions);
+	dem_ids = &(lbm[0]->dem_ids);
+	dem_radii = &(lbm[0]->dem_radii);
+	dem_velocity = &(lbm[0]->dem_velocity);
+	dem_omega = &(lbm[0]->dem_omega);
+	sphere_cap = &(lbm[0]->sphere_cap);
+	dem_force = &(lbm[0]->dem_force);
+	dem_torque = &(lbm[0]->dem_torque);
 #endif // DEM
 	}
 #ifdef GRAPHICS
@@ -630,7 +640,7 @@ LBM::~LBM() {
 	delete[] lbm;
 }
 
-// TODO add something for DEM, as we need LIGGGHTS to exist, and particles
+// TODO add something for DEM -> N_particles has to be > 0
 // to be placed before we can sensibly start fluidx3d
 void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) { // sanity checks on grid resolution and extension support
 	if((ulong)Nx*(ulong)Ny*(ulong)Nz==0ull) print_error("Grid point number is 0: "+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+" = 0.");
@@ -723,8 +733,12 @@ void LBM::sanity_checks_initialization() { // sanity checks during initializatio
 #endif // TEMPERATURE
 }
 
-// TODO write LIGGGHTS array to device
-void LBM::initialize() { // write all data fields to device and call kernel_initialize
+#ifdef DEM
+void LBM::initialize(const LAMMPS_NS::LAMMPS* liggghts) {
+#else
+void LBM::initialize() {
+#endif // DEM
+// write all data fields to device and call kernel_initialize
 	sanity_checks_initialization();
 
 	for(uint d=0u; d<get_D(); d++) lbm[d]->rho.enqueue_write_to_device();
@@ -742,7 +756,17 @@ void LBM::initialize() { // write all data fields to device and call kernel_init
 #ifdef PARTICLES
 	for(uint d=0u; d<get_D(); d++) lbm[d]->particles.enqueue_write_to_device();
 #endif // PARTICLES
-
+#ifdef DEM
+	initialise_from_liggghts(liggghts);
+	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_positions.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_ids.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_radii.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_velocity.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_omega.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm[d]->sphere_cap.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_force.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_torque.enqueue_write_to_device();
+#endif // DEM
 	for(uint d=0u; d<get_D(); d++) lbm[d]->increment_time_step(); // the communicate calls at initialization need an odd time step
 	communicate_rho_u_flags();
 #ifdef SURFACE
