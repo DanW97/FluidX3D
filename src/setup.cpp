@@ -1,11 +1,7 @@
-#pragma once
 // LIGGGHTS
 #include "lammps.h"
-#include <mpi.h>
 #include "input.h"
-#include <string.h>
-#include <signal.h>
-#include "signal_handling.h"
+#include <mpi.h>
 
 // FluidX3D
 #include "setup.hpp"
@@ -86,13 +82,15 @@ void main_setup() { // mill - fluid only
 
 // Needs DEM define 
 // TODO see which other defines are required
-void main_setup(LAMMPS_NS::LAMMPS* lammps) { // mill - newtonian w/ solids
+void main_setup(const LAMMPS_NS::LAMMPS* liggghts) { // mill - newtonian w/ solids
     // dirty rounding lambda
     auto rnd = [](uint x) {return ((x + 5u) / 10u) * 10u;};
     // Simulation box size, viscosity, and other setups
     // input file
     // TODO actually create this file
     const std::string packing_file = "../mill_packing.sim";
+    // liggghts initialise
+    // liggghts -> input -> file(packing_file.c_str());
     const uint Nx = 350u; const uint Ny = 350u; const uint Nz = 512u;
     const float eta = 0.1; // Pa s
     const float rho = 1.0f; // M
@@ -109,8 +107,12 @@ void main_setup(LAMMPS_NS::LAMMPS* lammps) { // mill - newtonian w/ solids
     const float couple_frequency = 0.01; // every 10 ms
     const uint dump_iter = rnd(units.t(dump_frequency));
     const uint couple_iter = rnd(units.t(couple_frequency));
+    std::cout << "About to create LBM object" << std::endl;
     // lbm object
-    LBM lbm(Nx, Ny, Nz, units.nu(si_nu));
+    LBM lbm(Nx, Ny, Nz, units.nu(si_nu), 0.0f, 0.0f, 0.0f, 5u, 20u);
+    std::cout << "LBM object created" << std::endl;
+    // important, gets all needed data from LIGGGHTS
+    lbm.initialise_from_liggghts(liggghts);
     // load in meshes
     const float chamber_size = units.x(si_Nx);
     const float impeller_size = units.x(0.29767f);
@@ -124,9 +126,11 @@ void main_setup(LAMMPS_NS::LAMMPS* lammps) { // mill - newtonian w/ solids
     const float si_omega = 2000.0 / 60.0 * 2.0 * 3.14; // 2000 rpm
     const float omega = units.omega(si_omega); // Lattice units
     const float domega = omega * dt;
+    sleep(60.0f);
+    std::cout << "Pre voxelise" << std::endl;
     lbm.voxelize_mesh_on_device(chamber, TYPE_S, center);
     lbm.voxelize_mesh_on_device(impeller, TYPE_S, center, float3(0.0f), float3(0.0f, 0.0f, omega));
-
+    std::cout << "Post voxelise" << std::endl;
     // set initial conditions
     const ulong N=lbm.get_N(); for(ulong n=0ull; n<N; n++) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
             if(x==0u||x==Nx-1u||y==0u||y==Ny-1u||z==0u||z==Nz-1u) lbm.flags[n] = TYPE_S; // all non periodic
@@ -138,7 +142,9 @@ void main_setup(LAMMPS_NS::LAMMPS* lammps) { // mill - newtonian w/ solids
 
     // run sim
     // lbm initialise
+    std::cout << "Pre GPU" << std::endl;
     lbm.run(0u);
+    std::cout << "Post GPU" << std::endl;
     print_info("Lattice U  = "+to_string(u, 6u));
     print_info("Lattice Omega = "+to_string(units.omega(si_omega), 6u));
     print_info("Lattice Nu = "+to_string(units.nu_from_tau(lbm.get_tau()), 6u));
@@ -150,14 +156,12 @@ void main_setup(LAMMPS_NS::LAMMPS* lammps) { // mill - newtonian w/ solids
     print_info("1 LBM step = "+to_string(units.si_t(1u))+" s");
     print_info("File every "+to_string(rnd(units.t(dump_frequency)))+" LBM steps");
     print_info("dt "+to_string(dt)+" LBM steps");
-    // liggghts initialise
-    lammps -> input -> file(packing_file.c_str());
     uint k = 0u;
     while(lbm.get_t() <= units.t(duration)) { // run for duration [s]
         // run liggghts for n steps
         const std::string cmd_string = "run "+std::to_string(couple_iter);
         const char *cmd = cmd_string.c_str();
-        lammps->input->one(cmd);
+        liggghts->input->one(cmd);
         // exchange forces
         if (lbm.get_t() % dump_iter == 0u) {
             // TODO add LIGGGHTS dumps too
@@ -165,12 +169,14 @@ void main_setup(LAMMPS_NS::LAMMPS* lammps) { // mill - newtonian w/ solids
             lbm.rho.write_device_to_vtk(get_exe_path() + "../post/rho_" + std::to_string(lbm.get_t()) + ".vtk");
         }
         if (lbm.get_t() % couple_iter == 0u) {
+            // get an idea of speed
+            info.print_update();
             // reset hydrodynamic force and torque
             lbm.reset_coupling_forces();
             // send info to fluidx3d
-            lbm.receive_liggghts_data(lammps);
+            lbm.receive_liggghts_data(liggghts);
             // calculated lbm forces to particles
-            lbm.send_force_data(lammps);
+            lbm.send_force_data(liggghts);
         }
         impeller -> rotate(float3x3(float3(0.0f, 0.0f, 1.0f), domega)); // perform rotation
         lbm.voxelize_mesh_on_device(impeller, TYPE_S, center, float3(0.0f), float3(0.0f, 0.0f, omega));
