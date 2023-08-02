@@ -31,9 +31,7 @@ string default_filename(const string& name, const string& extension, const ulong
 	return default_filename("", name, extension, t);
 }
 
-
-
-LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const int Ox, const int Oy, const int Oz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) { // constructor with manual device selection and domain offset
+LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const int Ox, const int Oy, const int Oz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho, const uint dem_particles_N, const uint coupling_frequency) { // constructor with manual device selection and domain offset
 	this->Nx = Nx; this->Ny = Ny; this->Nz = Nz;
 	this->Dx = Dx; this->Dy = Dy; this->Dz = Dz;
 	this->Ox = Ox; this->Oy = Oy; this->Oz = Oz;
@@ -43,6 +41,8 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	this->alpha = alpha; this->beta = beta;
 	this->particles_N = particles_N;
 	this->particles_rho = particles_rho;
+	this->dem_particles_N = dem_particles_N;
+	this->coupling_frequency = coupling_frequency;
 	string opencl_c_code;
 #ifdef GRAPHICS
 	graphics = Graphics(this);
@@ -59,16 +59,16 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 
 void LBM_Domain::allocate(Device& device) {
 	const ulong N = get_N();
-	rho = Memory<float>(device, N, 1u, true, true, 1.0f);
-	u = Memory<float>(device, N, 3u);
-	flags = Memory<uchar>(device, N);
-	fi = Memory<fpxx>(device, N, velocity_set, false);
+	rho = FX3DMemory<float>(device, N, 1u, true, true, 1.0f);
+	u = FX3DMemory<float>(device, N, 3u);
+	flags = FX3DMemory<uchar>(device, N);
+	fi = FX3DMemory<fpxx>(device, N, velocity_set, false);
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
 #ifdef FORCE_FIELD
-	F = Memory<float>(device, N, 3u);
+	F = FX3DMemory<float>(device, N, 3u);
 	kernel_stream_collide.add_parameters(F);
 	kernel_update_fields.add_parameters(F);
 	kernel_calculate_force_on_boundaries = Kernel(device, N, "calculate_force_on_boundaries", fi, flags, t, F);
@@ -80,9 +80,9 @@ void LBM_Domain::allocate(Device& device) {
 #endif // MOVING_BOUNDARIES
 
 #ifdef SURFACE
-	phi = Memory<float>(device, N);
-	mass = Memory<float>(device, N);
-	massex = Memory<float>(device, N);
+	phi = FX3DMemory<float>(device, N);
+	mass = FX3DMemory<float>(device, N);
+	massex = FX3DMemory<float>(device, N);
 	kernel_initialize.add_parameters(mass, massex, phi);
 	kernel_stream_collide.add_parameters(mass);
 	kernel_surface_0 = Kernel(device, N, "surface_0", fi, rho, u, flags, mass, massex, phi, t, fx, fy, fz);
@@ -92,15 +92,15 @@ void LBM_Domain::allocate(Device& device) {
 #endif // SURFACE
 
 #ifdef TEMPERATURE
-	T = Memory<float>(device, N, 1u, true, true, 1.0f);
-	gi = Memory<fpxx>(device, N, 7u, false);
+	T = FX3DMemory<float>(device, N, 1u, true, true, 1.0f);
+	gi = FX3DMemory<fpxx>(device, N, 7u, false);
 	kernel_initialize.add_parameters(gi, T);
 	kernel_stream_collide.add_parameters(gi, T);
 	kernel_update_fields.add_parameters(gi, T);
 #endif // TEMPERATURE
 
 #ifdef PARTICLES
-	particles = Memory<float>(device, (ulong)particles_N, 3u);
+	particles = FX3DMemory<float>(device, (ulong)particles_N, 3u);
 	kernel_integrate_particles = Kernel(device, (ulong)particles_N, "integrate_particles", particles, u, flags, 1.0f);
 #ifdef FORCE_FIELD
 	kernel_integrate_particles.add_parameters(F, fx, fy, fz);
@@ -109,15 +109,15 @@ void LBM_Domain::allocate(Device& device) {
 
 #ifdef DEM
     // TODO define methods to draw these values (in order) from LIGGGHTS
-    dem_positions = Memory<float>(device, (uint)dem_particles_N, 3u);
-    dem_ids = Memory<uint>(device, (uint)dem_particles_N, 1u);
-    dem_radii = Memory<float>(device, (uint)dem_particles_N, 1u);
-	dem_velocity = Memory<float>(device, (uint)dem_particles_N, 3u); 
-	dem_omega = Memory<float>(device, (uint)dem_particles_N, 3u); 
-	sphere_cap = Memory<float>(device, (uint)dem_particles_N, 1u); 
+    dem_positions = FX3DMemory<float>(device, (uint)dem_particles_N, 3u);
+    dem_ids = FX3DMemory<uint>(device, (uint)dem_particles_N, 1u);
+    dem_radii = FX3DMemory<float>(device, (uint)dem_particles_N, 1u);
+	dem_velocity = FX3DMemory<float>(device, (uint)dem_particles_N, 3u); 
+	dem_omega = FX3DMemory<float>(device, (uint)dem_particles_N, 3u); 
+	sphere_cap = FX3DMemory<float>(device, (uint)dem_particles_N, 1u); 
     // these are zeroed before each coupling step
-    dem_force = Memory<float>(device, (uint)dem_particles_N, 3u, true, true, 0.0f);
-    dem_torque = Memory<float>(device, (uint)dem_particles_N, 3u, true, true, 0.0f);
+    dem_force = FX3DMemory<float>(device, (uint)dem_particles_N, 3u, true, true, 0.0f);
+    dem_torque = FX3DMemory<float>(device, (uint)dem_particles_N, 3u, true, true, 0.0f);
 	// zeroing kernel
 	kernel_reset_dem_forces = Kernel(device, N, "reset_dem_forces", dem_force, dem_torque);
     // initialise arrays on GPU
@@ -198,10 +198,10 @@ uint LBM_Domain::get_velocity_set() const {
 }
 
 void LBM_Domain::voxelize_mesh_on_device(const Mesh* mesh, const uchar flag, const float3& rotation_center, const float3& linear_velocity, const float3& rotational_velocity) { // voxelize triangle mesh
-	Memory<float3> p0(device, mesh->triangle_number, 1u, mesh->p0);
-	Memory<float3> p1(device, mesh->triangle_number, 1u, mesh->p1);
-	Memory<float3> p2(device, mesh->triangle_number, 1u, mesh->p2);
-	Memory<float> bounding_box_and_velocity(device, 16u);
+	FX3DMemory<float3> p0(device, mesh->triangle_number, 1u, mesh->p0);
+	FX3DMemory<float3> p1(device, mesh->triangle_number, 1u, mesh->p1);
+	FX3DMemory<float3> p2(device, mesh->triangle_number, 1u, mesh->p2);
+	FX3DMemory<float> bounding_box_and_velocity(device, 16u);
 	const float x0=mesh->pmin.x-2.0f, y0=mesh->pmin.y-2.0f, z0=mesh->pmin.z-2.0f, x1=mesh->pmax.x+2.0f, y1=mesh->pmax.y+2.0f, z1=mesh->pmax.z+2.0f; // use bounding box of mesh to speed up voxelization; add tolerance of 2 cells for re-voxelization of moving objects
 	bounding_box_and_velocity[ 0] = as_float(mesh->triangle_number);
 	bounding_box_and_velocity[ 1] = x0;
@@ -386,15 +386,15 @@ string LBM_Domain::device_defines() const { return
 #ifdef DEM
 	"\n #define DEM"
 	"\n #define def_dem_particles_N "+to_string(dem_particles_N)+"u"
-	"\n #define def_coupling_frequency"+to_string(coupling_frequency)+"ul";
+	"\n #define def_coupling_frequency "+to_string(coupling_frequency)+"ul";
 #endif // DEM
 ;}
 
 #ifdef GRAPHICS
 void LBM_Domain::Graphics::allocate(Device& device) {
-	bitmap = Memory<int>(device, camera.width*camera.height);
-	zbuffer = Memory<int>(device, camera.width*camera.height, 1u, lbm->get_D()>1u); // if there are multiple domains, allocate zbuffer also on host side
-	camera_parameters = Memory<float>(device, 15u);
+	bitmap = FX3DMemory<int>(device, camera.width*camera.height);
+	zbuffer = FX3DMemory<int>(device, camera.width*camera.height, 1u, lbm->get_D()>1u); // if there are multiple domains, allocate zbuffer also on host side
+	camera_parameters = FX3DMemory<float>(device, 15u);
 	kernel_clear = Kernel(device, bitmap.length(), "graphics_clear", bitmap, zbuffer);
 
 	kernel_graphics_flags = Kernel(device, lbm->get_N(), "graphics_flags", lbm->flags, camera_parameters, bitmap, zbuffer);
@@ -413,7 +413,7 @@ void LBM_Domain::Graphics::allocate(Device& device) {
 #endif // FORCE_FIELD
 
 #ifdef SURFACE
-	skybox = Memory<int>(device, skybox_image->width()*skybox_image->height(), 1u, skybox_image->data());
+	skybox = FX3DMemory<int>(device, skybox_image->width()*skybox_image->height(), 1u, skybox_image->data());
 	kernel_graphics_rasterize_phi = Kernel(device, lbm->get_N(), "graphics_rasterize_phi", lbm->phi, camera_parameters, bitmap, zbuffer);
 	kernel_graphics_raytrace_phi = Kernel(device, bitmap.length(), "graphics_raytrace_phi", lbm->phi, lbm->flags, skybox, camera_parameters, bitmap);
 #endif // SURFACE
@@ -558,14 +558,14 @@ vector<Device_Info> smart_device_selection(const uint D) {
 	return device_infos;
 }
 
-LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) // single device
-	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho) { // delegating constructor
+LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho, const uint dem_particles_N, const uint coupling_frequency) // single device
+	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho, 0.0f, 0u) { // delegating constructor
 }
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const uint particles_N, const float particles_rho)
-	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, particles_N, particles_rho) { // delegating constructor
+	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, particles_N, particles_rho, 0.0f, 0u) { // delegating constructor
 }
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint particles_N, const float particles_rho)
-	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, particles_N, particles_rho) { // delegating constructor
+	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, particles_N, particles_rho, 0.0f, 0u) { // delegating constructor
 }
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint dem_particles_N, const uint coupling_frequency) 
 	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, 0u, 0.0f, dem_particles_N, coupling_frequency) { // delegating constructor
@@ -580,37 +580,37 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 	lbm = new LBM_Domain*[D];
 	for(uint d=0u; d<D; d++) { // { thread* threads=new thread[D]; for(uint d=0u; d<D; d++) threads[d]=thread([=]() {
 		const uint x=((uint)d%(Dx*Dy))%Dx, y=((uint)d%(Dx*Dy))/Dx, z=(uint)d/(Dx*Dy); // d = x+(y+z*Dy)*Dx
-		lbm[d] = new LBM_Domain(device_infos[d], Nx/Dx+2u*Hx, Ny/Dy+2u*Hy, Nz/Dz+2u*Hz, Dx, Dy, Dz, (int)(x*Nx/Dx)-(int)Hx, (int)(y*Ny/Dy)-(int)Hy, (int)(z*Nz/Dz)-(int)Hz, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho);
+		lbm[d] = new LBM_Domain(device_infos[d], Nx/Dx+2u*Hx, Ny/Dy+2u*Hy, Nz/Dz+2u*Hz, Dx, Dy, Dz, (int)(x*Nx/Dx)-(int)Hx, (int)(y*Ny/Dy)-(int)Hy, (int)(z*Nz/Dz)-(int)Hz, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho, dem_particles_N, coupling_frequency);
 	} // }); for(uint d=0u; d<D; d++) threads[d].join(); delete[] threads; }
 	{
-		Memory<float>** buffers_rho = new Memory<float>*[D];
+		FX3DMemory<float>** buffers_rho = new FX3DMemory<float>*[D];
 		for(uint d=0u; d<D; d++) buffers_rho[d] = &(lbm[d]->rho);
-		rho = Memory_Container(this, buffers_rho, "rho");
+		rho = FX3DMemory_Container(this, buffers_rho, "rho");
 	} {
-		Memory<float>** buffers_u = new Memory<float>*[D];
+		FX3DMemory<float>** buffers_u = new FX3DMemory<float>*[D];
 		for(uint d=0u; d<D; d++) buffers_u[d] = &(lbm[d]->u);
-		u = Memory_Container(this, buffers_u, "u");
+		u = FX3DMemory_Container(this, buffers_u, "u");
 	} {
-		Memory<uchar>** buffers_flags = new Memory<uchar>*[D];
+		FX3DMemory<uchar>** buffers_flags = new FX3DMemory<uchar>*[D];
 		for(uint d=0u; d<D; d++) buffers_flags[d] = &(lbm[d]->flags);
-		flags = Memory_Container(this, buffers_flags, "flags");
+		flags = FX3DMemory_Container(this, buffers_flags, "flags");
 	} {
 #ifdef FORCE_FIELD
-		Memory<float>** buffers_F = new Memory<float>*[D];
+		FX3DMemory<float>** buffers_F = new FX3DMemory<float>*[D];
 		for(uint d=0u; d<D; d++) buffers_F[d] = &(lbm[d]->F);
-		F = Memory_Container(this, buffers_F, "F");
+		F = FX3DMemory_Container(this, buffers_F, "F");
 #endif // FORCE_FIELD
 	} {
 #ifdef SURFACE
-		Memory<float>** buffers_phi = new Memory<float>*[D];
+		FX3DMemory<float>** buffers_phi = new FX3DMemory<float>*[D];
 		for(uint d=0u; d<D; d++) buffers_phi[d] = &(lbm[d]->phi);
-		phi = Memory_Container(this, buffers_phi, "phi");
+		phi = FX3DMemory_Container(this, buffers_phi, "phi");
 #endif // SURFACE
 	} {
 #ifdef TEMPERATURE
-		Memory<float>** buffers_T = new Memory<float>*[D];
+		FX3DMemory<float>** buffers_T = new FX3DMemory<float>*[D];
 		for(uint d=0u; d<D; d++) buffers_T[d] = &(lbm[d]->T);
-		T = Memory_Container(this, buffers_T, "T");
+		T = FX3DMemory_Container(this, buffers_T, "T");
 #endif // TEMPERATURE
 	} {
 #ifdef PARTICLES
@@ -642,7 +642,7 @@ LBM::~LBM() {
 
 // TODO add something for DEM -> N_particles has to be > 0
 // to be placed before we can sensibly start fluidx3d
-void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) { // sanity checks on grid resolution and extension support
+void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho, const uint dem_particles_N, const uint coupling_frequency) { // sanity checks on grid resolution and extension support
 	if((ulong)Nx*(ulong)Ny*(ulong)Nz==0ull) print_error("Grid point number is 0: "+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+" = 0.");
 	if(Nx%Dx!=0u || Ny%Dy!=0u || Nz%Dz!=0u) print_error("LBM grid ("+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+") is not equally divisible in domains ("+to_string(Dx)+"x"+to_string(Dy)+"x"+to_string(Dz)+").");
 	if(Dx*Dy*Dz==0u) print_error("You specified 0 LBM grid domains ("+to_string(Dx)+"x"+to_string(Dy)+"x"+to_string(Dz)+"). There has to be at least 1 domain in every direction. Check your input in LBM constructor.");
@@ -654,12 +654,12 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 	if(memory_required>memory_available) {
 		float factor = cbrt((float)memory_available/(float)memory_required);
 		const uint maxNx=(uint)(factor*(float)Nx), maxNy=(uint)(factor*(float)Ny), maxNz=(uint)(factor*(float)Nz);
-		string message = "Grid resolution ("+to_string(Nx)+", "+to_string(Ny)+", "+to_string(Nz)+") is too large: "+to_string(Dx*Dy*Dz)+"x "+to_string(memory_required)+" MB required, "+to_string(Dx*Dy*Dz)+"x "+to_string(memory_available)+" MB available. Largest possible resolution is ("+to_string(maxNx)+", "+to_string(maxNy)+", "+to_string(maxNz)+"). Restart the simulation with lower resolution or on different device(s) with more memory.";
+		string message = "Grid resolution ("+to_string(Nx)+", "+to_string(Ny)+", "+to_string(Nz)+") is too large: "+to_string(Dx*Dy*Dz)+"x "+to_string(memory_required)+" MB required, "+to_string(Dx*Dy*Dz)+"x "+to_string(memory_available)+" MB available. Largest possible resolution is ("+to_string(maxNx)+", "+to_string(maxNy)+", "+to_string(maxNz)+"). Restart the simulation with lower resolution or on different device(s) with more FX3DMemory.";
 #if !defined(FP16S)&&!defined(FP16C)
 		uint memory_required_fp16 = (uint)((ulong)Nx*(ulong)Ny*(ulong)Nz/((ulong)(Dx*Dy*Dz))*((ulong)velocity_set*2ull+17ull)/1048576ull); // in MB
 		float factor_fp16 = cbrt((float)memory_available/(float)memory_required_fp16);
 		const uint maxNx_fp16=(uint)(factor_fp16*(float)Nx), maxNy_fp16=(uint)(factor_fp16*(float)Ny), maxNz_fp16=(uint)(factor_fp16*(float)Nz);
-		message += " Consider using FP16S/FP16C memory compression to double maximum grid resolution to a maximum of ("+to_string(maxNx_fp16)+", "+to_string(maxNy_fp16)+", "+to_string(maxNz_fp16)+"); for this, uncomment \"#define FP16S\" or \"#define FP16C\" in defines.hpp.";
+		message += " Consider using FP16S/FP16C FX3DMemory compression to double maximum grid resolution to a maximum of ("+to_string(maxNx_fp16)+", "+to_string(maxNy_fp16)+", "+to_string(maxNz_fp16)+"); for this, uncomment \"#define FP16S\" or \"#define FP16C\" in defines.hpp.";
 #endif // !FP16S&&!FP16C
 		print_error(message);
 	}
@@ -733,11 +733,7 @@ void LBM::sanity_checks_initialization() { // sanity checks during initializatio
 #endif // TEMPERATURE
 }
 
-#ifdef DEM
-void LBM::initialize(const LAMMPS_NS::LAMMPS* liggghts) {
-#else
 void LBM::initialize() {
-#endif // DEM
 // write all data fields to device and call kernel_initialize
 	sanity_checks_initialization();
 
@@ -757,7 +753,6 @@ void LBM::initialize() {
 	for(uint d=0u; d<get_D(); d++) lbm[d]->particles.enqueue_write_to_device();
 #endif // PARTICLES
 #ifdef DEM
-	initialise_from_liggghts(liggghts);
 	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_positions.enqueue_write_to_device();
 	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_ids.enqueue_write_to_device();
 	for(uint d=0u; d<get_D(); d++) lbm[d]->dem_radii.enqueue_write_to_device();
@@ -910,11 +905,23 @@ void LBM::integrate_particles(const ulong steps, const uint time_step_multiplica
 }
 #endif // PARTICLES&&!FORCE_FIELD
 
+#ifdef DEM
+void LBM::initialise_from_liggghts(const LAMMPS_NS::LAMMPS* liggghts) {
+	std::cout << "initialise from liggghts called" << std::endl;
+}
+void LBM::receive_liggghts_data(const LAMMPS_NS::LAMMPS* liggghts) {
+	std::cout << "receive liggghts data called" << std::endl;
+}
+void LBM::send_force_data(const LAMMPS_NS::LAMMPS* liggghts) {
+	std::cout << "send force data called" << std::endl;
+}
+#endif // DEM
+
 void LBM::write_status(const string& path) { // write LBM status report to a .txt file
 	string status = "";
 	status += "Grid Resolution = ("+to_string(Nx)+", "+to_string(Ny)+", "+to_string(Nz)+")\n";
 	status += "LBM type = D"+string(get_velocity_set()==9 ? "2" : "3")+"Q"+to_string(get_velocity_set())+" "+info.collision+"\n";
-	status += "Memory Usage = "+to_string(info.cpu_mem_required)+" MB (CPU), "+to_string(info.gpu_mem_required)+" MB (GPU)\n";
+	status += "FX3DMemory Usage = "+to_string(info.cpu_mem_required)+" MB (CPU), "+to_string(info.gpu_mem_required)+" MB (GPU)\n";
 	status += "Maximum Allocation Size = "+to_string((uint)(get_N()*(ulong)(get_velocity_set()*sizeof(fpxx))/1048576ull))+" MB\n";
 	status += "Time Step = "+to_string(get_t())+" / "+(info.steps==max_ulong ? "infinite" : to_string(info.steps))+"\n";
 	status += "Kinematic Viscosity = "+to_string(get_nu())+"\n";
@@ -1141,14 +1148,14 @@ void LBM::Graphics::write_frame_bmp(const uint x1, const uint y1, const uint x2,
 
 
 
-void LBM_Domain::allocate_transfer(Device& device) { // allocate all memory for multi-device trqansfer
+void LBM_Domain::allocate_transfer(Device& device) { // allocate all FX3DMemory for multi-device trqansfer
 	ulong Amax = 0ull; // maximum domain side area of communicated directions
 	if(Dx>1u) Amax = max(Amax, (ulong)Ny*(ulong)Nz); // Ax
 	if(Dy>1u) Amax = max(Amax, (ulong)Nz*(ulong)Nx); // Ay
 	if(Dz>1u) Amax = max(Amax, (ulong)Nx*(ulong)Ny); // Az
 
-	transfer_buffer_p = Memory<char>(device, Amax, max(transfers*(uint)sizeof(fpxx), 17u)); // only allocate one set of transfer buffers in plus/minus directions, for all x/y/z transfers
-	transfer_buffer_m = Memory<char>(device, Amax, max(transfers*(uint)sizeof(fpxx), 17u));
+	transfer_buffer_p = FX3DMemory<char>(device, Amax, max(transfers*(uint)sizeof(fpxx), 17u)); // only allocate one set of transfer buffers in plus/minus directions, for all x/y/z transfers
+	transfer_buffer_m = FX3DMemory<char>(device, Amax, max(transfers*(uint)sizeof(fpxx), 17u));
 
 	kernel_transfer[enum_transfer_field::fi              ][0] = Kernel(device, 0u, "transfer_extract_fi"              , 0u, t, transfer_buffer_p, transfer_buffer_m, fi);
 	kernel_transfer[enum_transfer_field::fi              ][1] = Kernel(device, 0u, "transfer__insert_fi"              , 0u, t, transfer_buffer_p, transfer_buffer_m, fi);

@@ -13,6 +13,8 @@ string default_filename(const string& name, const string& extension, const ulong
 #pragma warning(disable:26812)
 enum enum_transfer_field { fi, rho_u_flags, flags, phi_massex_flags, gi, enum_transfer_field_length };
 
+// namespace required to ensure FX3DMemory classes in both libraries can't see each other
+
 class LBM_Domain {
 private:
 	uint Nx=1u, Ny=1u, Nz=1u; // (local) lattice dimensions
@@ -31,8 +33,8 @@ private:
 	Device device; // OpenCL device associated with this LBM domain
 	Kernel kernel_initialize; // initialization kernel
 	Kernel kernel_stream_collide; // main LBM kernel
-	Kernel kernel_update_fields; // reads DDFs and updates (rho, u, T) in device memory
-	Memory<fpxx> fi; // LBM density distribution functions (DDFs); only exist in device memory
+	Kernel kernel_update_fields; // reads DDFs and updates (rho, u, T) in device FX3DMemory
+	FX3DMemory<fpxx> fi; // LBM density distribution functions (DDFs); only exist in device FX3DMemory
 	ulong t_last_update_fields = 0ull; // optimization to not call kernel_update_fields multiple times if (rho, u, T) are already up-to-date
 #ifdef FORCE_FIELD
 	Kernel kernel_calculate_force_on_boundaries; // calculate forces from fluid on TYPE_S nodes
@@ -46,57 +48,57 @@ private:
 	Kernel kernel_surface_1; // additional kernel for flag handling
 	Kernel kernel_surface_2; // additional kernel for flag handling
 	Kernel kernel_surface_3; // additional kernel for flag handling and mass conservation
-	Memory<float> mass; // fluid mass; phi=mass/rho
-	Memory<float> massex; // excess mass; used for mass conservation
+	FX3DMemory<float> mass; // fluid mass; phi=mass/rho
+	FX3DMemory<float> massex; // excess mass; used for mass conservation
 #endif // SURFACE
 #ifdef TEMPERATURE
-	Memory<fpxx> gi; // thermal DDFs
+	FX3DMemory<fpxx> gi; // thermal DDFs
 #endif // TEMPERATURE
 #ifdef PARTICLES
 	Kernel kernel_integrate_particles; // intgegrates particles forward in time and couples particles to fluid
 #endif // PARTICLES
 
-	void allocate(Device& device); // allocate all memory for data fields on host and device and set up kernels
+	void allocate(Device& device); // allocate all FX3DMemory for data fields on host and device and set up kernels
 	string device_defines() const; // returns preprocessor constants for embedding in OpenCL C code
 
 public:
-	Memory<float> rho; // density of every node
-	Memory<float> u; // velocity of every node
-	Memory<uchar> flags; // flags of every node
+	FX3DMemory<float> rho; // density of every node
+	FX3DMemory<float> u; // velocity of every node
+	FX3DMemory<uchar> flags; // flags of every node
 #ifdef FORCE_FIELD
-	Memory<float> F; // individual force for every node
+	FX3DMemory<float> F; // individual force for every node
 #endif // FORCE_FIELD
 #ifdef SURFACE
-	Memory<float> phi; // fill level of every node
+	FX3DMemory<float> phi; // fill level of every node
 #endif // SURFACE
 #ifdef TEMPERATURE
-	Memory<float> T; // temperature of every node
+	FX3DMemory<float> T; // temperature of every node
 #endif // TEMPERATURE
 #ifdef PARTICLES
-	Memory<float> particles; // particle positions
+	FX3DMemory<float> particles; // particle positions
 #endif // PARTICLES
 #ifdef DEM
-	Memory<float> dem_positions; // dem particle positions
-	Memory<uint> dem_ids; // dem particle ids
-	Memory<float> dem_radii; // dem particle radii
-	Memory<float> dem_velocity; // dem particle translational velocity
-	Memory<float> dem_omega; // dem particle rotational velocity
-	Memory<float> sphere_cap; // horrific integral used in epsilon linear approximation
-    Memory<float> dem_force; // hydrodynamic force on dem particles
-    Memory<float> dem_torque; // hydrodynamic torque on dem particles
+	FX3DMemory<float> dem_positions; // dem particle positions
+	FX3DMemory<uint> dem_ids; // dem particle ids
+	FX3DMemory<float> dem_radii; // dem particle radii
+	FX3DMemory<float> dem_velocity; // dem particle translational velocity
+	FX3DMemory<float> dem_omega; // dem particle rotational velocity
+	FX3DMemory<float> sphere_cap; // horrific integral used in epsilon linear approximation
+    FX3DMemory<float> dem_force; // hydrodynamic force on dem particles
+    FX3DMemory<float> dem_torque; // hydrodynamic torque on dem particles
 
 	Kernel kernel_reset_dem_forces;
 
 #endif // DEM
 
-	Memory<char> transfer_buffer_p, transfer_buffer_m; // transfer buffers for multi-device domain communication, only allocate one set of transfer buffers in plus/minus directions, for all x/y/z transfers
+	FX3DMemory<char> transfer_buffer_p, transfer_buffer_m; // transfer buffers for multi-device domain communication, only allocate one set of transfer buffers in plus/minus directions, for all x/y/z transfers
 	Kernel kernel_transfer[enum_transfer_field::enum_transfer_field_length][2]; // for each field one extract and one insert kernel
-	void allocate_transfer(Device& device); // allocate all memory for multi-device transfer
+	void allocate_transfer(Device& device); // allocate all FX3DMemory for multi-device transfer
 	ulong get_area(const uint direction);
 	void enqueue_transfer_extract_field(Kernel& kernel_transfer_extract_field, const uint direction, const uint bytes_per_cell);
 	void enqueue_transfer_insert_field(Kernel& kernel_transfer_insert_field, const uint direction, const uint bytes_per_cell);
 
-	LBM_Domain(const Device_Info& device_info, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const int Ox, const int Oy, const int Oz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho); // compiles OpenCL C code and allocates memory
+	LBM_Domain(const Device_Info& device_info, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const int Ox, const int Oy, const int Oz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho, const uint dem_particles_N, const uint coupling_frequency); // compiles OpenCL C code and allocates FX3DMemory
 
 	void enqueue_initialize(); // write all data fields to device and call kernel_initialize
 	void enqueue_stream_collide(); // call kernel_stream_collide to perform one LBM time step
@@ -152,9 +154,9 @@ public:
 	class Graphics {
 	private:
 		Kernel kernel_clear; // reset bitmap and zbuffer
-		Memory<int> bitmap; // bitmap for rendering
-		Memory<int> zbuffer; // z-buffer for rendering
-		Memory<float> camera_parameters; // contains camera position, rotation, field of view etc.
+		FX3DMemory<int> bitmap; // bitmap for rendering
+		FX3DMemory<int> zbuffer; // z-buffer for rendering
+		FX3DMemory<float> camera_parameters; // contains camera position, rotation, field of view etc.
 
 		LBM_Domain* lbm = nullptr;
 		Kernel kernel_graphics_flags; // render flag lattice with wireframe
@@ -166,7 +168,7 @@ public:
 #ifdef SURFACE
 		const string path_skybox = get_exe_path()+"../skybox/skybox8k.png";
 		Image* skybox_image = nullptr;
-		Memory<int> skybox; // skybox for free surface raytracing
+		FX3DMemory<int> skybox; // skybox for free surface raytracing
 		Kernel kernel_graphics_rasterize_phi; // rasterize free surface
 		Kernel kernel_graphics_raytrace_phi; // raytrace free surface
 		Image* get_skybox_image() const { return skybox_image; }
@@ -194,7 +196,7 @@ public:
 #endif // SURFACE
 			return *this;
 		}
-		void allocate(Device& device); // allocate memory for bitmap and zbuffer
+		void allocate(Device& device); // allocate FX3DMemory for bitmap and zbuffer
 		void enqueue_draw_frame(const int visualization_modes, const int slice_mode=0, const int slice_x=0, const int slice_y=0, const int slice_z=0); // main rendering function, calls rendering kernels
 		int* get_bitmap(); // returns pointer to bitmap
 		int* get_zbuffer(); // returns pointer to zbuffer
@@ -212,13 +214,9 @@ private:
 	uint Dx=1u, Dy=1u, Dz=1u; // lattice domains
 	bool initialized = false; // becomes true after LBM::initialize() has been called
 
-	void sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho); // sanity checks on grid resolution and extension support
+	void sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho, const uint dem_particles_N, const uint coupling_frequency); // sanity checks on grid resolution and extension support
 	void sanity_checks_initialization(); // sanity checks during initialization on used extensions based on used flags
-	#ifdef DEM // write all data fields to device and call kernel_initialize
-		void initialize(const LAMMPS_NS::LAMMPS* liggghts); // if DEM enabled, need LIGGGHTS pointer during initialisation
-	#else
-		void initialize();
-	#endif // DEM
+	void initialize();
 	void do_time_step(); // call kernel_stream_collide to perform one LBM time step
 
 	void communicate_field(const enum_transfer_field field, const uint bytes_per_cell);
@@ -234,14 +232,14 @@ private:
 #endif // TEMPERATURE
 
 public:
-	template<typename T> class Memory_Container { // does not hold any data itsef, just links to LBM_Domain data
+	template<typename T> class FX3DMemory_Container { // does not hold any data itsef, just links to LBM_Domain data
 	private:
 		LBM* lbm = nullptr;
 		ulong N = 0ull; // buffer length
 		uint d = 1u; // buffer dimensions
 		uint Nx=1u, Ny=1u, Nz=1u; // (local) lattice dimensions
 		uint Dx=1u, Dy=1u, Dz=1u; // lattice domains
-		Memory<T>** buffers = nullptr; // host buffers
+		FX3DMemory<T>** buffers = nullptr; // host buffers
 		string name = "";
 		inline void initialize_auxiliary_pointers() {
 			/********/ x = Pointer(this, 0x0u);
@@ -300,20 +298,20 @@ public:
 	public:
 		class Pointer {
 		private:
-			Memory_Container* memory = nullptr;
+			FX3DMemory_Container* FX3DMemory = nullptr;
 			uint dimension = 0u;
 		public:
 			inline Pointer() {}; // default constructor
-			inline Pointer(Memory_Container* memory, const uint dimension) {
-				this->memory = memory;
+			inline Pointer(FX3DMemory_Container* FX3DMemory, const uint dimension) {
+				this->FX3DMemory = FX3DMemory;
 				this->dimension = dimension;
 			}
-			inline T& operator[](const ulong i) { return memory->reference(i, dimension); }
-			inline const T& operator[](const ulong i) const { return memory->reference(i, dimension); }
+			inline T& operator[](const ulong i) { return FX3DMemory->reference(i, dimension); }
+			inline const T& operator[](const ulong i) const { return FX3DMemory->reference(i, dimension); }
 		};
 		Pointer x, y, z; // host buffer auxiliary pointers for multi-dimensional array access (array of structures)
 
-		inline Memory_Container(LBM* lbm, Memory<T>** buffers, const string& name) {
+		inline FX3DMemory_Container(LBM* lbm, FX3DMemory<T>** buffers, const string& name) {
 			this->lbm = lbm;
 			this->Nx = lbm->get_Nx(); this->Ny = lbm->get_Ny(); this->Nz = lbm->get_Nz();
 			this->Dx = lbm->get_Dx(); this->Dy = lbm->get_Dy(); this->Dz = lbm->get_Dz();
@@ -321,18 +319,18 @@ public:
 			this->name = name;
 			this->N = (ulong)this->Nx*(ulong)this->Ny*(ulong)this->Nz;
 			this->d = buffers[0]->dimensions();
-			if(this->N*(ulong)this->d==0ull) print_error("Memory size must be larger than 0.");
+			if(this->N*(ulong)this->d==0ull) print_error("FX3DMemory size must be larger than 0.");
 			initialize_auxiliary_pointers();
 		}
-		inline Memory_Container() {} // default constructor
-		inline Memory_Container& operator=(Memory_Container&& memory) noexcept { // move assignment
-			this->lbm = memory.lbm;
-			this->Nx = memory.Nx; this->Ny = memory.Ny; this->Nz = memory.Nz;
-			this->Dx = memory.Dx; this->Dy = memory.Dy; this->Dz = memory.Dz;
-			this->buffers = memory.buffers;
-			this->name = memory.name;
-			this->N = memory.N;
-			this->d = memory.d;
+		inline FX3DMemory_Container() {} // default constructor
+		inline FX3DMemory_Container& operator=(FX3DMemory_Container&& FX3DMemory) noexcept { // move assignment
+			this->lbm = FX3DMemory.lbm;
+			this->Nx = FX3DMemory.Nx; this->Ny = FX3DMemory.Ny; this->Nz = FX3DMemory.Nz;
+			this->Dx = FX3DMemory.Dx; this->Dy = FX3DMemory.Dy; this->Dz = FX3DMemory.Dz;
+			this->buffers = FX3DMemory.buffers;
+			this->name = FX3DMemory.name;
+			this->N = FX3DMemory.N;
+			this->d = FX3DMemory.d;
 			initialize_auxiliary_pointers();
 			return *this;
 		}
@@ -352,7 +350,7 @@ public:
 		inline const T operator()(const ulong i, const uint dimension) const { return reference(i, dimension); } // array of structures
 		inline void read_from_device() {
 #ifndef UPDATE_FIELDS
-			for(uint domain=0u; domain<Dx*Dy*Dz; domain++) lbm->lbm[domain]->enqueue_update_fields(); // make sure data in device memory is up-to-date
+			for(uint domain=0u; domain<Dx*Dy*Dz; domain++) lbm->lbm[domain]->enqueue_update_fields(); // make sure data in device FX3DMemory is up-to-date
 #endif // UPDATE_FIELDS
 			for(uint domain=0u; domain<Dx*Dy*Dz; domain++) buffers[domain]->enqueue_read_from_device();
 			for(uint domain=0u; domain<Dx*Dy*Dz; domain++) buffers[domain]->finish_queue();
@@ -372,32 +370,32 @@ public:
 
 	LBM_Domain** lbm; // one LBM object per domain
 
-	Memory_Container<float> rho; // density of every node
-	Memory_Container<float> u; // velocity of every node
-	Memory_Container<uchar> flags; // flags of every node
+	FX3DMemory_Container<float> rho; // density of every node
+	FX3DMemory_Container<float> u; // velocity of every node
+	FX3DMemory_Container<uchar> flags; // flags of every node
 #ifdef FORCE_FIELD
-	Memory_Container<float> F; // individual force for every node
+	FX3DMemory_Container<float> F; // individual force for every node
 #endif // FORCE_FIELD
 #ifdef SURFACE
-	Memory_Container<float> phi; // fill level of every node
+	FX3DMemory_Container<float> phi; // fill level of every node
 #endif // SURFACE
 #ifdef TEMPERATURE
-	Memory_Container<float> T; // temperature of every node
+	FX3DMemory_Container<float> T; // temperature of every node
 #endif // TEMPERATURE
 #ifdef PARTICLES
-	Memory<float>* particles; // particle positions
+	FX3DMemory<float>* particles; // particle positions
 #endif // PARTICLES
 #ifdef DEM
 // TODO work out why everything else except particles aren't pointers
 // TODO if i need a buffer, maintain it here
-	Memory<float>* dem_positions; // dem particle positions
-	Memory<uint>* dem_ids; // dem particle ids
-	Memory<float>* dem_radii; // dem particle radii
-	Memory<float>* dem_velocity; // dem particle translational velocity
-	Memory<float>* dem_omega; // dem particle rotational velocity
-	Memory<float>* sphere_cap; // horrific integral used in epsilon linear approximation
-    Memory<float>* dem_force; // hydrodynamic force on dem particles
-    Memory<float>* dem_torque; // hydrodynamic torque on dem particles
+	FX3DMemory<float>* dem_positions; // dem particle positions
+	FX3DMemory<uint>* dem_ids; // dem particle ids
+	FX3DMemory<float>* dem_radii; // dem particle radii
+	FX3DMemory<float>* dem_velocity; // dem particle translational velocity
+	FX3DMemory<float>* dem_omega; // dem particle rotational velocity
+	FX3DMemory<float>* sphere_cap; // horrific integral used in epsilon linear approximation
+    FX3DMemory<float>* dem_force; // hydrodynamic force on dem particles
+    FX3DMemory<float>* dem_torque; // hydrodynamic torque on dem particles
 	void reset_coupling_forces();
 	// transfer calculated forces to liggghts array
     // TODO see if i can directly write to the array or if i need a buffer
@@ -416,10 +414,11 @@ public:
 	void initialise_from_liggghts(const LAMMPS_NS::LAMMPS* liggghts);
 #endif // DEM
 
-	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=0.0f); // compiles OpenCL C code and allocates memory
-	LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=0.0f); // compiles OpenCL C code and allocates memory
-	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const uint particles_N, const float particles_rho=1.0f); // compiles OpenCL C code and allocates memory
-	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint particles_N, const float particles_rho=1.0f); // compiles OpenCL C code and allocates memory
+	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=0.0f, const uint dem_particles_N=0u, const uint coupling_frequency=0u); // compiles OpenCL C code and allocates FX3DMemory
+	LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=0.0f, const uint dem_particles_N=0u, const uint coupling_frequency=0u); // compiles OpenCL C code and allocates FX3DMemory
+	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const uint particles_N, const float particles_rho=1.0f); // compiles OpenCL C code and allocates FX3DMemory
+	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint particles_N, const float particles_rho=1.0f); // compiles OpenCL C code and allocates FX3DMemory
+	LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint dem_particles_N, const uint coupling_frequency); // compiles OpenCL C code and allocates FX3DMemory
 	~LBM();
 
 	void run(const ulong steps=max_ulong); // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
