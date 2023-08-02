@@ -1,4 +1,3 @@
-#pragma once
 // LIGGGHTS
 #include "lammps.h"
 #include <mpi.h>
@@ -13,9 +12,9 @@
 #include "setup.hpp"
 
 #ifdef DEM
-void main_physics(LAMMPS_NS::LAMMPS* lammps) {
+void main_physics(LAMMPS_NS::LAMMPS* liggghts) {
         info.print_logo();
-        main_setup(lammps); // execute setup
+        main_setup(liggghts); // execute setup
         running = false;
         exit(0); // make sure that the program stops
 }
@@ -36,14 +35,24 @@ int main(int argc, char *argv[]) {
 
     // read in LIGGGHTS file and create liggghts object
     MPI_Init(&argc, &argv);
-    const LAMMPS_NS::LAMMPS *lammps = new LAMMPS_NS::LAMMPS(argc, argv, MPI_COMM_WORLD);
-    // main_arguments = get_main_arguments(argc, argv);
-    thread compute_thread(main_physics, lammps);
-    do { // main console loop
-            info.print_update();
-            sleep(0.050);
-    } while(running);
-    compute_thread.join();
+    int rank = 10;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    LAMMPS_NS::LAMMPS *liggghts;
+    liggghts = new LAMMPS_NS::LAMMPS(argc, argv, MPI_COMM_WORLD);
+    if (rank == 0) {
+        // thread compute_thread(main_physics, *lammps);
+        // do { // main console loop
+        //         info.print_update();
+        //         sleep(0.050);
+        // } while(running);
+        // compute_thread.join();
+        main_physics(liggghts);
+    }
+    
+
+    // simulation complete, ensure that liggghts abd MPI have been cleaned up
+    delete liggghts;
+    MPI_Finalize();
     return 0;
 }
 #else
