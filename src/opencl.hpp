@@ -198,7 +198,7 @@ public:
 	inline bool is_initialized() const { return exists; }
 };
 
-template<typename T> class Memory {
+template<typename T> class FX3DMemory {
 private:
 	ulong N = 0ull; // buffer length
 	uint d = 1u; // buffer dimensions
@@ -231,7 +231,7 @@ private:
 public:
 	T *x=nullptr, *y=nullptr, *z=nullptr, *w=nullptr; // host buffer auxiliary pointers for multi-dimensional array access (array of structures)
 	T *s0=nullptr, *s1=nullptr, *s2=nullptr, *s3=nullptr, *s4=nullptr, *s5=nullptr, *s6=nullptr, *s7=nullptr, *s8=nullptr, *s9=nullptr, *sA=nullptr, *sB=nullptr, *sC=nullptr, *sD=nullptr, *sE=nullptr, *sF=nullptr;
-	inline Memory(Device& device, const ulong N, const uint dimensions=1u, const bool allocate_host=true, const bool allocate_device=true, const T value=(T)0) {
+	inline FX3DMemory(Device& device, const ulong N, const uint dimensions=1u, const bool allocate_host=true, const bool allocate_device=true, const T value=(T)0) {
 		if(!device.is_initialized()) print_error("No Device selected. Call Device constructor.");
 		if(N*(ulong)dimensions==0ull) print_error("Memory size must be larger than 0.");
 		this->N = N;
@@ -245,7 +245,7 @@ public:
 		}
 		write_to_device();
 	}
-	inline Memory(Device& device, const ulong N, const uint dimensions, T* const host_buffer, const bool allocate_device=true) {
+	inline FX3DMemory(Device& device, const ulong N, const uint dimensions, T* const host_buffer, const bool allocate_device=true) {
 		if(!device.is_initialized()) print_error("No Device selected. Call Device constructor.");
 		if(N*(ulong)dimensions==0ull) print_error("Memory size must be larger than 0.");
 		this->N = N;
@@ -257,11 +257,11 @@ public:
 		external_host_buffer = true;
 		write_to_device();
 	}
-	inline Memory() {} // default constructor
-	inline ~Memory() {
+	inline FX3DMemory() {} // default constructor
+	inline ~FX3DMemory() {
 		delete_buffers();
 	}
-	inline Memory& operator=(Memory&& memory) noexcept { // move assignment
+	inline FX3DMemory& operator=(FX3DMemory&& memory) noexcept { // move assignment
 		delete_buffers(); // delete existing buffers and restore default state
 		N = memory.length(); // copy values/pointers from memory
 		d = memory.dimensions();
@@ -448,7 +448,7 @@ private:
 	cl::Kernel cl_kernel;
 	cl::NDRange cl_range_global, cl_range_local;
 	cl::CommandQueue cl_queue;
-	template<typename T> inline void link_parameter(const uint position, const Memory<T>& memory) {
+	template<typename T> inline void link_parameter(const uint position, const FX3DMemory<T>& memory) {
 		cl_kernel.setArg(position, memory.get_cl_buffer());
 	}
 	template<typename T> inline void link_parameter(const uint position, const T& constant) {
@@ -462,14 +462,14 @@ private:
 		link_parameters(starting_position+1u, parameters...);
 	}
 public:
-	template<class... T> inline Kernel(const Device& device, const ulong N, const string& name, const T&... parameters) { // accepts Memory<T> objects and fundamental data type constants
+	template<class... T> inline Kernel(const Device& device, const ulong N, const string& name, const T&... parameters) { // accepts FX3DMemory<T> objects and fundamental data type constants
 		if(!device.is_initialized()) print_error("No Device selected. Call Device constructor.");
 		cl_kernel = cl::Kernel(device.get_cl_program(), name.c_str());
 		link_parameters(number_of_parameters, parameters...); // expand variadic template to link kernel parameters
 		set_ranges(N);
 		cl_queue = device.get_cl_queue();
 	}
-	template<class... T> inline Kernel(const Device& device, const ulong N, const uint workgroup_size, const string& name, const T&... parameters) { // accepts Memory<T> objects and fundamental data type constants
+	template<class... T> inline Kernel(const Device& device, const ulong N, const uint workgroup_size, const string& name, const T&... parameters) { // accepts FX3DMemory<T> objects and fundamental data type constants
 		if(!device.is_initialized()) print_error("No Device selected. Call Device constructor.");
 		cl_kernel = cl::Kernel(device.get_cl_program(), name.c_str());
 		link_parameters(number_of_parameters, parameters...); // expand variadic template to link kernel parameters
