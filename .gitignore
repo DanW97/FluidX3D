@@ -1,4 +1,7 @@
 bin/
+temp/
+.vs/
+FluidX3D.vcxproj.user
 log.liggghts
 .vscode
 .idea

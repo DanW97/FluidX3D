@@ -5,10 +5,6 @@ Info info;
 
 void Info::initialize(LBM* lbm) {
 	this->lbm = lbm;
-	device_transfer = lbm->get_velocity_set()*(2u*sizeof(fpxx))+17u; // lattice.set()*(2*fi) + flags + rho + 3*u
-#ifndef UPDATE_FIELDS
-	device_transfer -= 16u; // rho, u
-#endif // UPDATE_FIELDS
 #if defined(SRT)
 	collision = "SRT";
 #elif defined(TRT)
@@ -21,33 +17,25 @@ void Info::initialize(LBM* lbm) {
 #else // FP32
 	collision += " (FP32/FP32)";
 #endif // FP32
-#if defined(MOVING_BOUNDARIES)||defined(SURFACE)||defined(TEMPERATURE)
-	device_transfer += (lbm->get_velocity_set()-1u)*1u; // neighbor flags have to be loaded
-#endif // MOVING_BOUNDARIES, SURFACE or TEMPERATURE
-#ifdef SURFACE
-	host_allocation += 4u; // phi
-	device_transfer += (1u+(2u*lbm->get_velocity_set()-1u)*sizeof(fpxx)+8u+(lbm->get_velocity_set()-1u)*4u) + 1u + 1u + (4u+lbm->get_velocity_set()+4u+4u+4u); // surface_0 (flags, fi, mass, massex), surface_1 (flags), surface_2 (flags), surface_3 (rho, flags, mass, massex, phi)
-#endif // SURFACE
-#ifdef TEMPERATURE
-	host_allocation += 4u; // T
-	device_transfer += 7u*2u*sizeof(fpxx)+4u; // 2*gi, T
-#endif // TEMPERATURE
-	cpu_mem_required = (uint)(lbm->get_N()*(ulong)host_allocation/1048576ull); // reset to get valid values for consecutive simulations
+	cpu_mem_required = (uint)(lbm->get_N()*(ulong)bytes_per_cell_host()/1048576ull); // reset to get valid values for consecutive simulations
 	gpu_mem_required = lbm->lbm[0]->get_device().info.memory_used;
+	print_info("Allocating memory. This may take a few seconds.");
 }
 void Info::append(const ulong steps, const ulong t) {
 	this->steps = steps; // has to be executed before info.print_initialize()
 	this->steps_last = t; // reset last step count if multiple run() commands are executed consecutively
-	this->runtime_last = runtime; // reset last runtime if multiple run() commands are executed consecutively
+	this->runtime_lbm_last = runtime_lbm; // reset last runtime if multiple run() commands are executed consecutively
+	this->runtime_total = clock.stop();
 }
 void Info::update(const double dt) {
-	this->dt = dt; // exact dt
-	this->dt_smooth = (dt+0.3)/(0.3/dt_smooth+1.0); // smoothed dt
-	this->runtime += dt; // skip first step since it is likely slower than average
+	this->runtime_lbm_timestep_last = dt; // exact dt
+	this->runtime_lbm_timestep_smooth = (dt+0.3)/(0.3/runtime_lbm_timestep_smooth+1.0); // smoothed dt
+	this->runtime_lbm += dt; // skip first step since it is likely slower than average
+	this->runtime_total = clock.stop();
 }
 double Info::time() const { // returns either elapsed time or remaining time
-	return steps==max_ulong ? runtime : ((double)steps/(double)(lbm->get_t()-steps_last)-1.0)*(runtime-runtime_last); // time estimation on average so far
-	//return steps==max_ulong ? runtime : ((double)steps-(double)(lbm->get_t()-steps_last))*dt_smooth; // instantaneous time estimation
+	return steps==max_ulong ? runtime_lbm : ((double)steps/(double)(lbm->get_t()-steps_last)-1.0)*(runtime_lbm-runtime_lbm_last); // time estimation on average so far
+	//return steps==max_ulong ? runtime_lbm : ((double)steps-(double)(lbm->get_t()-steps_last))*runtime_lbm_timestep_smooth; // instantaneous time estimation
 }
 void Info::print_logo() const {
 	const int a=color_light_blue, b=color_orange, c=color_pink;
@@ -67,8 +55,9 @@ void Info::print_logo() const {
 	print("|                                  ");                print("\\  \\ /  /", c);                 print("                                  |\n");
 	print("|                                   ");                print("\\  '  /", c);                  print("                                   |\n");
 	print("|                                    ");                print("\\   /", c);                  print("                                    |\n");
-	print("|                                     ");                print("\\ /", c);                  print("                FluidX3D Version 2.7 |\n");
+	print("|                                     ");                print("\\ /", c);                  print("                FluidX3D Version 2.9 |\n");
 	print("|                                      ");                 print("'", c);                  print("     Copyright (c) Dr. Moritz Lehmann |\n");
+	print("|-----------------------------------------------------------------------------|\n");
 }
 void Info::print_initialize() {
 	const float Re = lbm->get_Re_max();
@@ -98,13 +87,14 @@ void Info::print_initialize() {
 #else // INTERACTIVE_GRAPHICS_ASCII
 	println("'-----------------'-----------------------------------------------------------'");
 #endif // INTERACTIVE_GRAPHICS_ASCII
+	clock.start();
 	allow_rendering = true;
 }
 void Info::print_update() const {
 	if(allow_rendering) reprint(
-		"|"+alignr(8, to_uint((double)lbm->get_N()*1E-6/dt_smooth))+" |"+ // MLUPs
-		alignr(7, to_uint((double)lbm->get_N()*(double)device_transfer*1E-9/dt_smooth))+" GB/s |"+ // memory bandwidth
-		alignr(10, to_uint(1.0/dt_smooth))+" | "+ // steps/s
+		"|"+alignr(8, to_uint((double)lbm->get_N()*1E-6/runtime_lbm_timestep_smooth))+" |"+ // MLUPs
+		alignr(7, to_uint((double)lbm->get_N()*(double)bandwidth_bytes_per_cell_device()*1E-9/runtime_lbm_timestep_smooth))+" GB/s |"+ // memory bandwidth
+		alignr(10, to_uint(1.0/runtime_lbm_timestep_smooth))+" | "+ // steps/s
 		(steps==max_ulong ? alignr(17, lbm->get_t()) : alignr(12, lbm->get_t())+" "+print_percentage((double)(lbm->get_t()-steps_last)/(double)steps))+" | "+ // current step
 		alignr(19, print_time(time()))+" |" // either elapsed time or remaining time
 	);

@@ -20,6 +20,7 @@
 #endif // UTILITIES_REGEX
 #include <iostream>
 #include <thread> // contains <chrono>
+#include <functional> // for parallel_for(...)
 #undef min
 #undef max
 using std::string;
@@ -54,6 +55,41 @@ typedef uint64_t ulong;
 #define epsilon_double 2.2204460492503131E-16
 #define inf_double as_double(0x7FF0000000000000)
 #define nan_double as_double(0xFFFFFFFFFFFFFFFF)
+
+inline void parallel_for(const uint N, const uint threads, std::function<void(uint, uint)> lambda) { // usage: parallel_for(N, threads, [&](uint n, uint t) { ... });
+	vector<thread> thread_array(threads);
+	for(uint t=0u; t<threads; t++) thread_array[t] = thread([=]() {
+		for(ulong n=(ulong)N*(ulong)t/(ulong)threads; n<(ulong)N*(ulong)(t+1u)/(ulong)threads; n++) lambda((uint)n, t);
+	});
+	for(uint t=0u; t<threads; t++) thread_array[t].join();
+}
+inline void parallel_for(const uint N, const uint threads, std::function<void(uint)> lambda) { // usage: parallel_for(N, threads, [&](uint n) { ... });
+	vector<thread> thread_array(threads);
+	for(uint t=0u; t<threads; t++) thread_array[t] = thread([=]() {
+		for(ulong n=(ulong)N*(ulong)t/(ulong)threads; n<(ulong)N*(ulong)(t+1u)/(ulong)threads; n++) lambda((uint)n);
+	});
+	for(uint t=0u; t<threads; t++) thread_array[t].join();
+}
+inline void parallel_for(const uint N, std::function<void(uint)> lambda) { // usage: parallel_for(N, [&](uint n) { ... });
+	parallel_for(N, (uint)thread::hardware_concurrency(), lambda);
+}
+inline void parallel_for(const ulong N, const uint threads, std::function<void(ulong, uint)> lambda) { // usage: parallel_for(N, threads, [&](ulong n, uint t) { ... });
+	vector<thread> thread_array(threads);
+	for(uint t=0u; t<threads; t++) thread_array[t] = thread([=]() {
+		for(ulong n=N*(ulong)t/(ulong)threads; n<N*(ulong)(t+1u)/(ulong)threads; n++) lambda(n, t);
+	});
+	for(uint t=0u; t<threads; t++) thread_array[t].join();
+}
+inline void parallel_for(const ulong N, const uint threads, std::function<void(ulong)> lambda) { // usage: parallel_for(N, threads, [&](ulong n) { ... });
+	vector<thread> thread_array(threads);
+	for(uint t=0u; t<threads; t++) thread_array[t] = thread([=]() {
+		for(ulong n=N*(ulong)t/(ulong)threads; n<N*(ulong)(t+1u)/(ulong)threads; n++) lambda(n);
+	});
+	for(uint t=0u; t<threads; t++) thread_array[t].join();
+}
+inline void parallel_for(const ulong N, std::function<void(ulong)> lambda) { // usage: parallel_for(N, [&](ulong n) { ... });
+	parallel_for(N, (uint)thread::hardware_concurrency(), lambda);
+}
 
 class Clock {
 private:
@@ -2797,15 +2833,15 @@ inline string print_time(const double t) { // input: time in seconds, output: fo
 	       (dm?(dh&&m<10?"0"               :"")+to_string(m)+"m":"")+
 	           (dm&&s<10?"0"               :"")+to_string(s)+"s"    ;
 }
-inline string print_progress(const double x, const uint n=10u) {
-	const uint p = (uint)((double)n*x+0.5);
-	string s = "[";
-	for(uint i=0u; i<p; i++) s += "=";
-	for(uint i=p; i<n; i++) s += " ";
-	return s+"]";
+inline string print_percentage(const float x) {
+	return alignr(3u, to_uint(100.0f*x))+"%";
 }
-inline string print_percentage(const double x) {
-	return alignr(3u, to_uint(100.0*x))+"%";
+inline string print_progress(const float x, const int n=10) {
+	const int p = to_int((float)(n-7)*x);
+	string s = "[";
+	for(int i=0; i<p; i++) s += "=";
+	for(int i=p; i<n-7; i++) s += " ";
+	return s+"] "+print_percentage(x);
 }
 
 inline void print(const string& s="") {
@@ -2962,10 +2998,21 @@ inline int invert_brightness(const int color) { // invert brightness, but retain
 	const int r = red(color), g=green(color), b=blue(color);
 	return ::color(255-(g+b)/2, 255-(r+b)/2, 255-(r+g)/2);
 }
-inline int average_color(const int c1, const int c2) {
+inline int color_average(const int c1, const int c2) {
 	const int r1=red(c1), g1=green(c1), b1=blue(c1);
 	const int r2=red(c2), g2=green(c2), b2=blue(c2);
 	return color((r1+r2)/2, (g1+g2)/2, (b1+b2)/2);
+}
+inline int color_add(const int c1, const int c2) {
+	const int r1=red(c1), g1=green(c1), b1=blue(c1);
+	const int r2=red(c2), g2=green(c2), b2=blue(c2);
+	return color(min(r1+r2, 255), min(g1+g2, 255), min(b1+b2, 255));
+}
+inline int color_dim(const int c, const float x) {
+	const int r = clamp((int)fma((float)red  (c), x, 0.5f), 0, 255);
+	const int g = clamp((int)fma((float)green(c), x, 0.5f), 0, 255);
+	const int b = clamp((int)fma((float)blue (c), x, 0.5f), 0, 255);
+	return color(r, g, b);
 }
 inline float3 rgb_to_hsv(const int red, const int green, const int blue) {
 	const int cmax = max(max(red, green), blue);
@@ -2997,6 +3044,23 @@ inline uint hsv_to_rgb(const float3& hsv) {
 	return hsv_to_rgb(hsv.x, hsv.y, hsv.z);
 }
 
+#define color_black      0
+#define color_dark_blue  1
+#define color_dark_green 2
+#define color_light_blue 3
+#define color_dark_red   4
+#define color_magenta    5
+#define color_orange     6
+#define color_light_gray 7
+#define color_gray       8
+#define color_blue       9
+#define color_green     10
+#define color_cyan      11
+#define color_red       12
+#define color_pink      13
+#define color_yellow    14
+#define color_white     15
+
 #ifdef UTILITIES_CONSOLE_INPUT
 #define UTILITIES_CONSOLE_COLOR
 #endif // UTILITIES_CONSOLE_INPUT
@@ -3018,22 +3082,6 @@ inline uint hsv_to_rgb(const float3& hsv) {
 #endif // Windows/Linux
 #endif // UTILITIES_CONSOLE_COLOR
 #ifdef UTILITIES_CONSOLE_COLOR
-#define color_black      0
-#define color_dark_blue  1
-#define color_dark_green 2
-#define color_light_blue 3
-#define color_dark_red   4
-#define color_magenta    5
-#define color_orange     6
-#define color_light_gray 7
-#define color_gray       8
-#define color_blue       9
-#define color_green     10
-#define color_cyan      11
-#define color_red       12
-#define color_pink      13
-#define color_yellow    14
-#define color_white     15
 inline string get_exe_path() { // returns path where executable is located, ends with a "/"
 	string path = "";
 #if defined(_WIN32)
@@ -3357,17 +3405,12 @@ inline void print_image_bw(const Image* image, const uint textwidth=0u, const ui
 #ifdef UTILITIES_CONSOLE_DITHER_LOOKUP
 static bool print_image_dither_lookup_initialized = false;
 static ushort* print_image_dither_lookup = nullptr;
-inline void print_image_dither_initialize_lookup_thread(const int k, const int N) {
-	for(int i=k*16777216/N; i<(k+1)*16777216/N; i++) print_image_dither_lookup[i] = get_console_color_dither(i);
-}
 inline void print_image_dither_initialize_lookup() { // initialize lookup table parallelized (much faster)
 	if(!print_image_dither_lookup_initialized) {
 		print_image_dither_lookup = new ushort[16777216];
-		const int N = (int)thread::hardware_concurrency(); // number of CPU threads
-		thread* threads = new thread[N];
-		for(int k=0; k<N; k++) threads[k] = thread(print_image_dither_initialize_lookup_thread, k, N);
-		for(int k=0; k<N; k++) threads[k].join();
-		delete[] threads;
+		parallel_for(16777216u, [&](uint n) {
+			print_image_dither_lookup[n] = get_console_color_dither((int)n);
+		});
 		print_image_dither_lookup_initialized = true;
 	}
 }
@@ -3747,6 +3790,13 @@ inline int key_press() { // not working: ¹ (251), num lock (-144), caps lock (-
 }
 #endif // Windows/Linux
 #endif // UTILITIES_CONSOLE_INPUT
+#else // UTILITIES_CONSOLE_COLOR
+inline void print(const string& s, const int textcolor) {
+	std::cout << s;
+}
+inline void print(const string& s, const int textcolor, const int backgroundcolor) {
+	std::cout << s;
+}
 #endif // UTILITIES_CONSOLE_COLOR
 
 #ifdef UTILITIES_REGEX
@@ -3778,32 +3828,42 @@ inline string replace_regex(const string& s, const string& from, const string& t
 inline bool is_number(const string& s) {
 	return equals_regex(s, "\\d+(u|l|ul|ll|ull)?")||equals_regex(s, "0x(\\d|[a-fA-F])+(u|l|ul|ll|ull)?")||equals_regex(s, "0b[01]+(u|l|ul|ll|ull)?")||equals_regex(s, "(((\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+[fF]?)?)|(\\d+\\.\\d*|\\.\\d+)[fF]?)");
 }
-inline void print_message(const string& message, const string& keyword="") { // print formatted message
-	const uint k=length(keyword), w=CONSOLE_WIDTH-4u-k;
-	uint l = 0u;
-	string p="\r| "+keyword, f=" ";
+inline void print_message(const string& message, const string& keyword="", const int keyword_color=-1, const int colons=true) { // print formatted message
+	const uint k=length(keyword)+2u, w=CONSOLE_WIDTH-4u-k;
+	string p=colons?": ":"  ", f="";
 	for(uint j=0u; j<k; j++) f += " ";
 	vector<string> v = split_regex(message, "[\\s\\0]+");
+	uint l = 0u; // length of current line of words
 	for(uint i=0u; i<(uint)v.size(); i++) {
 		const string word = v.at(i);
 		const uint wordlength = length(word);
-		l += wordlength+1u;
-		if(l<=w+1u||wordlength>w) {
+		l += wordlength+1u; // word + space
+		if(l<=w+1u) { // word fits -> append word and space
 			p += word+" ";
-		} else {
-			l = l-length(v.at(i--))-1u;
+		} else if(wordlength>w) { // word overflows -> split word into next line
+			p += substring(word, 0, w-(l-wordlength-1u))+" |\n| "+f;
+			v[i] = substring(v[i], w-(l-wordlength-1u)); i--; // reuse same vector element for overflowing part, decrement i to start next line with this overflowing part
+			l = 0u; // reset line length
+		} else { // word does not fit -> fill remaining line with spaces
+			l = l-length(v.at(i--))-1u; // remove word from line, decrement i to start next line with this word
 			for(uint j=l; j<=w; j++) p += " ";
-			p += "|\n|"+f;
-			l = 0u;
+			p += "|\n| "+f;
+			l = 0u; // reset line length
 		}
 	}
 	for(uint j=l; j<=w; j++) p += " ";
+	if(keyword_color<0||keyword_color>15) {
+		print("\r| "+keyword);
+	} else {
+		print("\r| ");
+		print(keyword, keyword_color);
+	}
 	println(p+"|");
 }
 inline void print_error(const string& s) { // print formatted error message
-	print_message(s, "Error: ");
+	print_message(s, "Error", color_red);
 #ifdef _WIN32
-	print_message("Press Enter to exit.", "       ");
+	print_message("Press Enter to exit.", "     ", -1, false);
 #endif // _WIN32
 	string b = "";
 	for(int i=0; i<CONSOLE_WIDTH-2; i++) b += "-";
@@ -3814,10 +3874,10 @@ inline void print_error(const string& s) { // print formatted error message
 	exit(1);
 }
 inline void print_warning(const string& s) { // print formatted warning message
-	print_message(s, "Warning: ");
+	print_message(s, "Warning", color_orange);
 }
 inline void print_info(const string& s) { // print formatted info message
-	print_message(s, "Info: ");
+	print_message(s, "Info", color_green);
 }
 
 inline void parse_sanity_check_error(const string& s, const string& regex, const string& type) {
@@ -3881,6 +3941,24 @@ inline double to_double(const string& s, const double default_value) {
 	const string t = trim(s);
 	return parse_sanity_check(t, "[+-]?(((\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+[fF]?)?)|(\\d+\\.\\d*|\\.\\d+)[fF]?)") ? atof(t.c_str()) : default_value;
 }
+#else // UTILITIES_REGEX
+inline void print_message(const string& message, const string& keyword="", const int keyword_color=-1, const int colons=true) { // print message
+	println(keyword+": "+message);
+}
+inline void print_error(const string& s) { // print error message
+	println("Error: "+s);
+#ifdef _WIN32
+	println("       Press Enter to exit.");
+	wait();
+#endif //_WIN32
+	exit(1);
+}
+inline void print_warning(const string& s) { // print warning message
+	println("Warning: "+s);
+}
+inline void print_info(const string& s) { // print info message
+	println("Info: "+s);
+}
 #endif // UTILITIES_REGEX
 
 #ifdef UTILITIES_FILE
@@ -3910,7 +3988,7 @@ inline string create_file_extension(const string& filename, const string& extens
 }
 inline string read_file(const string& filename) {
 	std::ifstream file(filename, std::ios::in);
-	if(file.fail()) println("\rError: File \""+filename+"\" does not exist!");
+	if(file.fail()) print_error("File \""+filename+"\" does not exist!");
 	const string r((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 	file.close();
 	return r;
@@ -3942,7 +4020,7 @@ template<typename T, typename U> inline void write_file(const string& filename, 
 #pragma warning(disable:6385)
 inline Image* read_bmp(const string& filename, Image* image=nullptr) {
 	std::ifstream file(create_file_extension(filename, ".bmp"), std::ios::in|std::ios::binary);
-	if(file.fail()) println("\rError: File \""+filename+"\" does not exist!");
+	if(file.fail()) print_error("File \""+filename+"\" does not exist!");
 	uint width=0u, height=0u;
 	file.seekg(0, std::ios::end);
 	const uint filesize = (uint)file.tellg();
@@ -3950,13 +4028,13 @@ inline Image* read_bmp(const string& filename, Image* image=nullptr) {
 	uchar* data = new uchar[filesize];
 	file.read((char*)data, filesize);
 	file.close();
-	if(filesize==0u) println("\rError: File \""+filename+"\" is corrupt!");
+	if(filesize==0u) print_error("File \""+filename+"\" is corrupt!");
 	for(uint i=0u; i<4u; i++) {
 		width  |= data[18+i]<<(8u*i);
 		height |= data[22+i]<<(8u*i);
 	}
 	const uint pad=(4u-(3u*width)%4u)%4u, imagesize=(3u*width+pad)*height;
-	if(filesize!=54u+imagesize) println("\rError: File \""+filename+"\" is corrupt or unsupported!");
+	if(filesize!=54u+imagesize) print_error("File \""+filename+"\" is corrupt or unsupported!");
 	if(image==nullptr||image->width()!=width||image->height()!=height) {
 		delete image;
 		image = new Image(width, height);
@@ -3998,14 +4076,14 @@ inline void write_bmp(const string& filename, const Image* image) {
 }
 inline Image* read_qoi(const string& filename, Image* image=nullptr) { // 4-channel .qoi decoder, source: https://qoiformat.org/qoi-specification.pdf
 	std::ifstream file(create_file_extension(filename, ".qoi"), std::ios::in|std::ios::binary);
-	if(file.fail()) println("\rError: File \""+filename+"\" does not exist!");
+	if(file.fail()) print_error("File \""+filename+"\" does not exist!");
 	file.seekg(0, std::ios::end);
 	const uint filesize = (uint)file.tellg();
 	file.seekg(0, std::ios::beg);
 	uchar* data = new uchar[filesize];
 	file.read((char*)data, filesize);
 	file.close();
-	if(filesize<22u||((int*)data)[0]!=1718185841) println("\rError: File \""+filename+"\" is corrupt!");
+	if(filesize<22u||((int*)data)[0]!=1718185841) print_error("File \""+filename+"\" is corrupt!");
 	uint width=0u, height=0u;
 	for(uint i=0u; i<4u; i++) {
 		width  |= data[ 7u-i]<<(8u*i);
@@ -4176,7 +4254,8 @@ struct Mesh { // triangle mesh
 			p1[i] = scale*(p1[i]-center)+center;
 			p2[i] = scale*(p2[i]-center)+center;
 		}
-		find_bounds();
+		pmin = scale*(pmin-center)+center;
+		pmax = scale*(pmax-center)+center;
 	}
 	inline void translate(const float3& translation) {
 		for(uint i=0u; i<triangle_number; i++) {
@@ -4196,31 +4275,43 @@ struct Mesh { // triangle mesh
 		}
 		find_bounds();
 	}
+	inline void set_center(const float3& center) {
+		this->center = center;
+	}
 	inline const float3& get_center() const {
 		return center;
 	}
-	inline float get_min_size() {
+	inline const float3 get_bounding_box_size() const {
+		return pmax-pmin;
+	}
+	inline const float3 get_bounding_box_center() const {
+		return 0.5f*(pmin+pmax);
+	}
+	inline float get_min_size() const {
 		return fmin(fmin(pmax.x-pmin.x, pmax.y-pmin.y), pmax.z-pmin.z);
 	}
-	inline float get_max_size() {
+	inline float get_max_size() const {
 		return fmax(fmax(pmax.x-pmin.x, pmax.y-pmin.y), pmax.z-pmin.z);
 	}
+	inline float get_scale_for_box_fit(const float3& box_size) const { // scale factor to exactly fit mesh bounding box in simulation box
+		return fmin(fmin(box_size.x/(pmax.x-pmin.x), box_size.y/(pmax.y-pmin.y)), box_size.z/(pmax.z-pmin.z));
+	}
 };
-inline Mesh* read_stl(const string& path, const float3& box_size, const float3& center, const float3x3& rotation, const float size) { // read binary .stl file
+inline Mesh* read_stl_raw(const string& path, const bool reposition, const float3& box_size, const float3& center, const float3x3& rotation, const float size) { // read binary .stl file
 	const string filename = create_file_extension(path, ".stl");
 	std::ifstream file(filename, std::ios::in|std::ios::binary);
-	if(file.fail()) println("\rError: File \""+filename+"\" does not exist!");
+	if(file.fail()) print_error("File \""+filename+"\" does not exist!");
 	file.seekg(0, std::ios::end);
 	const uint filesize = (uint)file.tellg();
 	file.seekg(0, std::ios::beg);
 	uchar* data = new uchar[filesize];
 	file.read((char*)data, filesize);
 	file.close();
-	if(filesize==0u) println("\rError: File \""+filename+"\" is corrupt!");
+	if(filesize==0u) print_error("File \""+filename+"\" is corrupt!");
 	const uint triangle_number = ((uint*)data)[20];
 	uint counter = 84u;
-	if(triangle_number>0u&&filesize==84u+50u*triangle_number) println("Loading \""+filename+"\" with "+to_string(triangle_number)+" triangles.");
-	else println("\rError: File \""+filename+"\" is corrupt or unsupported! Only binary .stl files are supported.");
+	if(triangle_number>0u&&filesize==84u+50u*triangle_number) print_info("Loading \""+filename+"\" with "+to_string(triangle_number)+" triangles.");
+	else print_error("File \""+filename+"\" is corrupt or unsupported! Only binary .stl files are supported.");
 	Mesh* mesh = new Mesh(triangle_number, center);
 	mesh->p0[0] = float3(0.0f); // to fix warning C6001
 	for(uint i=0u; i<triangle_number; i++) {
@@ -4232,18 +4323,15 @@ inline Mesh* read_stl(const string& path, const float3& box_size, const float3& 
 	}
 	delete[] data;
 	mesh->find_bounds();
-	const float3 offset = -0.5f*(mesh->pmin+mesh->pmax); // auto-rescale mesh
 	float scale = 1.0f;
 	if(size==0.0f) { // auto-rescale to largest possible size
-		const float scale_x = box_size.x/(mesh->pmax.x-mesh->pmin.x);
-		const float scale_y = box_size.y/(mesh->pmax.y-mesh->pmin.y);
-		const float scale_z = box_size.z/(mesh->pmax.z-mesh->pmin.z);
-		scale = fmin(fmin(scale_x, scale_y), scale_z);
-	} else if(size>0.0f) { // rescale to specified size relative to box
-		scale = size/fmax(fmax(mesh->pmax.x-mesh->pmin.x, mesh->pmax.y-mesh->pmin.y), mesh->pmax.z-mesh->pmin.z);
+		scale = mesh->get_scale_for_box_fit(box_size);
+	} else if(size>0.0f) { // rescale longest bounding box side length of mesh to specified size
+		scale = size/mesh->get_max_size();
 	} else { // rescale to specified size relative to original size (input size as negative number)
 		scale = -size;
 	}
+	const float3 offset = reposition ? -0.5f*(mesh->pmin+mesh->pmax) : float3(0.0f); // auto-reposition mesh
 	for(uint i=0u; i<triangle_number; i++) { // rescale mesh
 		mesh->p0[i] = center+scale*(offset+mesh->p0[i]);
 		mesh->p1[i] = center+scale*(offset+mesh->p1[i]);
@@ -4252,8 +4340,14 @@ inline Mesh* read_stl(const string& path, const float3& box_size, const float3& 
 	mesh->find_bounds();
 	return mesh;
 }
-inline Mesh* read_stl(const string& path, const float3& box_size, const float3& center, const float size) { // read binary .stl file (no rotation)
-	return read_stl(path, box_size, center, float3x3(1.0f), size);
+inline Mesh* read_stl(const string& path, const float3& box_size, const float3& center, const float3x3& rotation, const float size) { // read binary .stl file (rescale and reposition)
+	return read_stl_raw(path, true, box_size, center, rotation, size);
+}
+inline Mesh* read_stl(const string& path, const float3& box_size, const float3& center, const float size) { // read binary .stl file (rescale and reposition, no rotation)
+	return read_stl_raw(path, true, box_size, center, float3x3(1.0f), size);
+}
+inline Mesh* read_stl(const string& path, const float scale=1.0f, const float3x3& rotation=float3x3(1.0f), const float3& offset=float3(0.0f)) { // read binary .stl file (do not auto-rescale and auto-reposition)
+	return read_stl_raw(path, false, float3(1.0f), offset, rotation, -fabs(scale));
 }
 
 class Configuration_File {
