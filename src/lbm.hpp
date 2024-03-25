@@ -6,6 +6,7 @@
 #include "units.hpp"
 #include "info.hpp"
 #include "lammps.h"
+#include "atom.h"
 
 uint bytes_per_cell_host(); // returns the number of Bytes per cell allocated in host memory
 uint bytes_per_cell_device(); // returns the number of Bytes per cell allocated in device memory
@@ -38,8 +39,8 @@ private:
 	Device device; // OpenCL device associated with this LBM domain
 	Kernel kernel_initialize; // initialization kernel
 	Kernel kernel_stream_collide; // main LBM kernel
-	Kernel kernel_update_fields; // reads DDFs and updates (rho, u, T) in device FX3DMemory
-	FX3DMemory<fpxx> fi; // LBM density distribution functions (DDFs); only exist in device FX3DMemory
+	Kernel kernel_update_fields; // reads DDFs and updates (rho, u, T) in device memory
+	FX3DMemory<fpxx> fi; // LBM density distribution functions (DDFs); only exist in device memory
 	ulong t_last_update_fields = 0ull; // optimization to not call kernel_update_fields multiple times if (rho, u, T) are already up-to-date
 #ifdef FORCE_FIELD
 	Kernel kernel_calculate_force_on_boundaries; // calculate forces from fluid on TYPE_S cells
@@ -392,15 +393,14 @@ public:
 #endif // PARTICLES
 #ifdef DEM
 // TODO work out why everything else except particles aren't pointers
-// TODO if i need a buffer, maintain it here
-	FX3DMemory<float>* dem_positions; // dem particle positions
-	FX3DMemory<uint>* dem_ids; // dem particle ids
-	FX3DMemory<float>* dem_radii; // dem particle radii
-	FX3DMemory<float>* dem_velocity; // dem particle translational velocity
-	FX3DMemory<float>* dem_omega; // dem particle rotational velocity
-	FX3DMemory<float>* sphere_cap; // horrific integral used in epsilon linear approximation
-    FX3DMemory<float>* dem_force; // hydrodynamic force on dem particles
-    FX3DMemory<float>* dem_torque; // hydrodynamic torque on dem particles
+	FX3DMemory_Container<float> dem_positions; // dem particle positions
+	FX3DMemory_Container<uint> dem_ids; // dem particle ids
+	FX3DMemory_Container<float> dem_radii; // dem particle radii
+	FX3DMemory_Container<float> dem_velocity; // dem particle translational velocity
+	FX3DMemory_Container<float> dem_omega; // dem particle rotational velocity
+	FX3DMemory_Container<float> sphere_cap; // horrific integral used in epsilon linear approximation
+    FX3DMemory_Container<float> dem_force; // hydrodynamic force on dem particles
+    FX3DMemory_Container<float> dem_torque; // hydrodynamic torque on dem particles
 	void reset_coupling_forces();
 	// transfer calculated forces to liggghts array
     // TODO see if i can directly write to the array or if i need a buffer
@@ -457,9 +457,9 @@ public:
 	float get_nu() const { return lbm[0]->get_nu(); } // get kinematic shear viscosity
 	float get_tau() const { return 3.0f*get_nu()+0.5f; } // get LBM relaxation time
 	float get_Re_max() const { return 0.57735027f*(float)min(min(Nx, Ny), Nz)/get_nu(); } // Re < c*L/nu
-	float get_fx() const { return lbm[0]->get_fx(); } // get global froce per volume
-	float get_fy() const { return lbm[0]->get_fy(); } // get global froce per volume
-	float get_fz() const { return lbm[0]->get_fz(); } // get global froce per volume
+	float get_fx() const { return lbm[0]->get_fx(); } // get global force per volume
+	float get_fz() const { return lbm[0]->get_fz(); } // get global force per volume
+	float get_fy() const { return lbm[0]->get_fy(); } // get global force per volume
 	float get_sigma() const { return lbm[0]->get_sigma(); } // get surface tension coefficient
 	float get_alpha() const { return lbm[0]->get_alpha(); } // get thermal diffusion coefficient
 	float get_beta() const { return lbm[0]->get_beta(); } // get thermal expansion coefficient

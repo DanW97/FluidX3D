@@ -8,8 +8,9 @@ set -e
 
 mkdir -p bin # create directory for executable
 rm -f ./bin/LX3D # cleanup
-
+rm -f ./post/*
 # the only compiliation option here will be linux, no X11
 mpiCC ./src/*.cpp -o ./bin/LX3D -std=c++17 -pthread -I./src/OpenCL/include -I$LIGGGHTS_PATH/include -L./src/OpenCL/lib -lOpenCL -L$LIGGGHTS_PATH/lib -l:libliggghts.so
-
-mpiexec -n 32 ./bin/LX3D "$@" # run LX3D
+# run LX3D
+mpiexec -n 32 ./bin/LX3D
+# ./bin/LX3D

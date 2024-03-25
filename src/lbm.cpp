@@ -159,7 +159,6 @@ void LBM_Domain::allocate(Device& device) {
 #endif // PARTICLES
 
 #ifdef DEM
-    // TODO define methods to draw these values (in order) from LIGGGHTS
     dem_positions = FX3DMemory<float>(device, (uint)dem_particles_N, 3u);
     dem_ids = FX3DMemory<uint>(device, (uint)dem_particles_N, 1u);
     dem_radii = FX3DMemory<float>(device, (uint)dem_particles_N, 1u);
@@ -227,6 +226,23 @@ void LBM_Domain::enqueue_integrate_particles(const uint time_step_multiplicator)
 	kernel_integrate_particles.set_parameters(3u, (float)time_step_multiplicator).enqueue_run();
 }
 #endif // PARTICLES
+#ifdef DEM
+
+void send_force_data(const LAMMPS_NS::LAMMPS* liggghts) {
+	// for (uint i = 0u; i < dem_particles_N; i++) {
+
+	// }
+}
+
+void receive_liggghts_data(const LAMMPS_NS::LAMMPS* liggghts) {
+
+}
+
+void initialise_from_liggghts(const LAMMPS_NS::LAMMPS* liggghts) {
+	// liggghts->atom->extract()
+	
+}
+#endif // DEM
 
 void LBM_Domain::increment_time_step(const uint steps) {
 	t += (ulong)steps; // increment time step
@@ -437,7 +453,8 @@ string LBM_Domain::device_defines() const { return
 #ifdef DEM
 	"\n #define DEM"
 	"\n #define def_dem_particles_N "+to_string(dem_particles_N)+"u"
-	"\n #define def_coupling_frequency "+to_string(coupling_frequency)+"ul";
+	"\n #define def_coupling_frequency "+to_string(coupling_frequency)+"ul"
+	"\n #define def_sqrt_3 "+to_string(1.73205081f)+"f"
 #endif // DEM
 ;}
 
@@ -611,13 +628,13 @@ vector<Device_Info> smart_device_selection(const uint D) {
 }
 
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho, const uint dem_particles_N, const uint coupling_frequency) // single device
-	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho, 0.0f, 0u) { // delegating constructor
+	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho, 0u, 0u) { // delegating constructor
 }
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const uint particles_N, const float particles_rho)
-	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, particles_N, particles_rho, 0.0f, 0u) { // delegating constructor
+	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, particles_N, particles_rho, 0u, 0u) { // delegating constructor
 }
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint particles_N, const float particles_rho)
-	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, particles_N, particles_rho, 0.0f, 0u) { // delegating constructor
+	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, particles_N, particles_rho, 0u, 0u) { // delegating constructor
 }
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const float nu, const float fx, const float fy, const float fz, const uint dem_particles_N, const uint coupling_frequency) 
 	:LBM(Nx, Ny, Nz, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, 0u, 0.0f, dem_particles_N, coupling_frequency) { // delegating constructor
@@ -679,14 +696,33 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 	} {
 #ifdef DEM 
 	// This will obviously need a rework if i decide to make multi-gpu work
-	dem_positions = &(lbm[0]->dem_positions);
-	dem_ids = &(lbm[0]->dem_ids);
-	dem_radii = &(lbm[0]->dem_radii);
-	dem_velocity = &(lbm[0]->dem_velocity);
-	dem_omega = &(lbm[0]->dem_omega);
-	sphere_cap = &(lbm[0]->sphere_cap);
-	dem_force = &(lbm[0]->dem_force);
-	dem_torque = &(lbm[0]->dem_torque);
+	// as the hardcoded 1 device stuff will become D devices
+	FX3DMemory<float>** buffers_dem_positions = new FX3DMemory<float>*[1u];
+	FX3DMemory<uint>** buffers_dem_ids = new FX3DMemory<uint>*[1u];
+	FX3DMemory<float>** buffers_dem_radii = new FX3DMemory<float>*[1u];
+	FX3DMemory<float>** buffers_dem_velocity = new FX3DMemory<float>*[1u];
+	FX3DMemory<float>** buffers_dem_omega = new FX3DMemory<float>*[1u];
+	FX3DMemory<float>** buffers_sphere_cap = new FX3DMemory<float>*[1u];
+	FX3DMemory<float>** buffers_dem_force = new FX3DMemory<float>*[1u];
+	FX3DMemory<float>** buffers_dem_torque = new FX3DMemory<float>*[1u];
+	for (uint d=0u; d<1u; d++) {
+		buffers_dem_positions[d] = &(lbm[d]->dem_positions);
+		buffers_dem_ids[d] = &(lbm[d]->dem_ids);
+		buffers_dem_radii[d] = &(lbm[d]->dem_radii);
+		buffers_dem_velocity[d] = &(lbm[d]->dem_velocity);
+		buffers_dem_omega[d] = &(lbm[d]->dem_omega);
+		buffers_sphere_cap[d] = &(lbm[d]->sphere_cap);
+		buffers_dem_force[d] = &(lbm[d]->dem_force);
+		buffers_dem_torque[d] = &(lbm[d]->dem_torque);
+	}
+	dem_positions = FX3DMemory_Container(this, buffers_dem_positions, "dem_positions");
+	dem_ids = FX3DMemory_Container(this, buffers_dem_ids, "dem_ids");
+	dem_radii = FX3DMemory_Container(this, buffers_dem_radii, "dem_radii");
+	dem_velocity = FX3DMemory_Container(this, buffers_dem_velocity, "dem_velocity");
+	dem_omega = FX3DMemory_Container(this, buffers_dem_omega, "dem_omega");
+	sphere_cap = FX3DMemory_Container(this, buffers_sphere_cap, "sphere_cap");
+	dem_force = FX3DMemory_Container(this, buffers_dem_force, "dem_force");
+	dem_torque = FX3DMemory_Container(this, buffers_dem_torque, "dem_torque");
 #endif // DEM
 	}
 #ifdef GRAPHICS
@@ -700,8 +736,6 @@ LBM::~LBM() {
 	delete[] lbm;
 }
 
-// TODO add something for DEM -> N_particles has to be > 0
-// to be placed before we can sensibly start fluidx3d
 void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho, const uint dem_particles_N, const uint coupling_frequency) { // sanity checks on grid resolution and extension support
 	if((ulong)Nx*(ulong)Ny*(ulong)Nz==0ull) print_error("Grid point number is 0: "+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+" = 0.");
 	if(Dx*Dy*Dz==0u) print_error("You specified 0 LBM grid domains ("+to_string(Dx)+"x"+to_string(Dy)+"x"+to_string(Dz)+"). There has to be at least 1 domain in every direction. Check your input in LBM constructor.");
@@ -759,6 +793,11 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 #else // PARTICLES
 	if(particles_N>0u) print_error("The PARTICLES extension is disabled but the number of particles is set to "+to_string(particles_N)+">0. Uncomment \"#define PARTICLES\" in defines.hpp.");
 #endif // PARTICLES
+#ifdef DEM
+	if(dem_particles_N == 0u || coupling_frequency == 0u) print_error("The DEM extension is enabled, but either the number of particles is set to zero (it is set to "+to_string(dem_particles_N)+") and/or, the coupling frequency was set to 0 (it is set to "+to_string(coupling_frequency)+").");
+#else
+	if(dem_particles_N>0u || coupling_frequency > 0u) print_error("The DEM extension is disabled but nonzero values were set for the number of particles and/or the coupling frequency. Uncomment \"#define PARTICLES\" in defines.hpp.");
+#endif // DEM
 }
 
 void LBM::sanity_checks_initialization() { // sanity checks during initialization on used extensions based on used flags
@@ -991,13 +1030,13 @@ void LBM::integrate_particles(const ulong steps, const uint time_step_multiplica
 
 #ifdef DEM
 void LBM::initialise_from_liggghts(const LAMMPS_NS::LAMMPS* liggghts) {
-	std::cout << "initialise from liggghts called" << std::endl;
+	print_info("initialise from liggghts called");
 }
 void LBM::receive_liggghts_data(const LAMMPS_NS::LAMMPS* liggghts) {
-	std::cout << "receive liggghts data called" << std::endl;
+	print_info("receive liggghts data called");
 }
 void LBM::send_force_data(const LAMMPS_NS::LAMMPS* liggghts) {
-	std::cout << "send force data called" << std::endl;
+	print_info("send force data called");
 }
 #endif // DEM
 
@@ -1005,7 +1044,7 @@ void LBM::write_status(const string& path) { // write LBM status report to a .tx
 	string status = "";
 	status += "Grid Resolution = ("+to_string(Nx)+", "+to_string(Ny)+", "+to_string(Nz)+")\n";
 	status += "LBM type = D"+string(get_velocity_set()==9 ? "2" : "3")+"Q"+to_string(get_velocity_set())+" "+info.collision+"\n";
-	status += "FX3DMemory Usage = "+to_string(info.cpu_mem_required)+" MB (CPU), "+to_string(info.gpu_mem_required)+" MB (GPU)\n";
+	status += "Memory Usage = "+to_string(info.cpu_mem_required)+" MB (CPU), "+to_string(info.gpu_mem_required)+" MB (GPU)\n";
 	status += "Maximum Allocation Size = "+to_string((uint)(get_N()*(ulong)(get_velocity_set()*sizeof(fpxx))/1048576ull))+" MB\n";
 	status += "Time Step = "+to_string(get_t())+" / "+(info.steps==max_ulong ? "infinite" : to_string(info.steps))+"\n";
 	status += "Runtime = "+print_time(info.runtime_total)+" (total) = "+print_time(info.runtime_lbm)+" (LBM) + "+print_time(info.runtime_total-info.runtime_lbm)+" (rendering and data evaluation)\n";
@@ -1099,9 +1138,11 @@ void LBM::voxelize_stl(const string& path, const float size, const uchar flag) {
 
 #ifdef DEM
 void LBM::reset_coupling_forces() { // reset force and torques before applying coupling
+	// TODO this'll need multi-gpuing when i figure that out
 	if(get_D()==1u) lbm[0]->kernel_reset_dem_forces().enqueue_run();
 	// TODO see if i need to wait for queue to finish
 }
+
 #endif // DEM
 
 #ifdef GRAPHICS
