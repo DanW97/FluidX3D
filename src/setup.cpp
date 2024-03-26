@@ -1,6 +1,5 @@
 // LIGGGHTS
 #include "lammps.h"
-#include "input.h"
 #include <mpi.h>
 
 // FluidX3D
@@ -55,7 +54,7 @@ void dump_data(LBM &lbm, const std::string &path) {
 		E2 = E1;
 		E1 = E0;
 	}
-} /**/
+} */
 
 /*
 void main_setup() { // mill - fluid only
@@ -244,7 +243,7 @@ void main_setup(const LAMMPS_NS::LAMMPS* liggghts) { // mill - newtonian w/ soli
         }
     }
 }
-/**/
+*/
 
 void main_setup(const LAMMPS_NS::LAMMPS* liggghts) { // flow over a sphere - validation of solid behaviour
     int rank;

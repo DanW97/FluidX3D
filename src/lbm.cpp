@@ -735,14 +735,14 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 	FX3DMemory<float>** buffers_dem_force = new FX3DMemory<float>*[1u];
 	FX3DMemory<float>** buffers_dem_torque = new FX3DMemory<float>*[1u];
 	for (uint d=0u; d<1u; d++) {
-		buffers_dem_positions[d] = &(lbm[d]->dem_positions);
-		buffers_dem_ids[d] = &(lbm[d]->dem_ids);
-		buffers_dem_radii[d] = &(lbm[d]->dem_radii);
-		buffers_dem_velocity[d] = &(lbm[d]->dem_velocity);
-		buffers_dem_omega[d] = &(lbm[d]->dem_omega);
-		buffers_sphere_cap[d] = &(lbm[d]->sphere_cap);
-		buffers_dem_force[d] = &(lbm[d]->dem_force);
-		buffers_dem_torque[d] = &(lbm[d]->dem_torque);
+		buffers_dem_positions[d] = &(lbm_domain[d]->dem_positions);
+		buffers_dem_ids[d] = &(lbm_domain[d]->dem_ids);
+		buffers_dem_radii[d] = &(lbm_domain[d]->dem_radii);
+		buffers_dem_velocity[d] = &(lbm_domain[d]->dem_velocity);
+		buffers_dem_omega[d] = &(lbm_domain[d]->dem_omega);
+		buffers_sphere_cap[d] = &(lbm_domain[d]->sphere_cap);
+		buffers_dem_force[d] = &(lbm_domain[d]->dem_force);
+		buffers_dem_torque[d] = &(lbm_domain[d]->dem_torque);
 	}
 	dem_positions = FX3DMemory_Container(this, buffers_dem_positions, "dem_positions");
 	dem_ids = FX3DMemory_Container(this, buffers_dem_ids, "dem_ids");
@@ -1175,7 +1175,7 @@ void LBM::voxelize_stl(const string& path, const float size, const uchar flag) {
 #ifdef DEM
 void LBM::reset_coupling_forces() { // reset force and torques before applying coupling
 	// TODO this'll need multi-gpuing when i figure that out
-	if(get_D()==1u) lbm[0]->kernel_reset_dem_forces().enqueue_run();
+	if(get_D()==1u) lbm_domain[0]->kernel_reset_dem_forces().enqueue_run();
 	// TODO see if i need to wait for queue to finish
 }
 

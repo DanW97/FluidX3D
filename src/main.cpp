@@ -1,19 +1,13 @@
 // LIGGGHTS
 #include "lammps.h"
 #include <mpi.h>
-#include "input.h"
 #include <string.h>
 #include <signal.h>
 #include "signal_handling.h"
-#include "universe.h"
-#include "atom.h"
 #include "library.h"
-#include <chrono>
-#include <thread>
 
 // FluidX3D
 #include "info.hpp"
-#include "lbm.hpp"
 #include "setup.hpp"
 
 #ifdef DEM
