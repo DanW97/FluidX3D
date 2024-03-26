@@ -35,12 +35,12 @@ public:
 	float eye_distance = 8.0f; // distance between cameras in VR mode
 	bool autorotation = false; // autorotation
 	bool key_update = true; // a key variable has been updated
+	bool lockmouse = false; // mouse movement won't change camera view when this is true
 
 private:
 	float log_zoom=4.0f*log(zoom), target_log_zoom=log_zoom;
 	double mouse_x=0.0, mouse_y=0.0, target_mouse_x=0.0, target_mouse_y=0.0; // mouse position
 	double mouse_sensitivity = 1.0; // mouse sensitivity
-	bool lockmouse = false; // mouse movement won't change camera view when this is true
 	bool key_state[512] = { 0 };
 
 public:
@@ -79,6 +79,11 @@ public:
 		R.xx =  cosrx;       R.xy =  sinrx;       R.xz = 0.0f;
 		R.yx =  sinrx*sinry; R.yy = -cosrx*sinry; R.yz = cosry;
 		R.zx = -sinrx*cosry; R.zy =  cosrx*cosry; R.zz = sinry;
+		if(!free) {
+			pos.x = R.zx*dis/zoom;
+			pos.y = R.zy*dis/zoom;
+			pos.z = R.zz*dis/zoom;
+		}
 	}
 	void set_key_state(const int key, const bool state) {
 		key_state[clamp(256+key, 0, 511)] = state;
@@ -211,6 +216,9 @@ private:
 		if(!free) {
 			zoom = exp(log_zoom*0.25f);
 		} else {
+			pos.x = R.zx*dis/zoom;
+			pos.y = R.zy*dis/zoom;
+			pos.z = R.zz*dis/zoom;
 			zoom = 1E16f;
 		}
 	}
@@ -252,14 +260,6 @@ private:
 		autorotation = !autorotation;
 	}
 	void input_U() {
-#if defined(INTERACTIVE_GRAPHICS) && defined(_WIN32)
-		if(!lockmouse) {
-			ShowCursor(true); // show cursor
-		} else {
-			ShowCursor(false); // hide cursor
-			SetCursorPos(width/2, height/2); // reset mouse
-		}
-#endif // Windows
 		lockmouse = !lockmouse;
 	}
 	void input_I() {
@@ -299,7 +299,7 @@ private:
 		}
 	}
 	void input_X() {
-		fov = fmax(fov-1.0f, 1.0f);
+		fov = fmax(fov-1.0f, 1E-6f);
 		dis = 0.5f*(float)width/tan(fov*pif/360.0f);
 	}
 	void input_Y() {
@@ -314,9 +314,6 @@ private:
 	}
 
 	void update_rotation(const double arx, const double ary) {
-#if defined(INTERACTIVE_GRAPHICS)&&defined(_WIN32)
-		if(!lockmouse) SetCursorPos((int)width/2, (int)height/2);
-#endif // INTERACTIVE_GRAPHICS && Windows
 		rx += arx*pi/180.0;
 		ry += ary*pi/180.0;
 		rx = fmod(rx, 2.0*pi);
@@ -337,6 +334,7 @@ void set_light(const uint i, const float3& p);
 
 void draw_bitmap(const int* bitmap);
 void draw_label(const int x, const int y, const string& s, const int color);
+void draw_line_label(const int x0, const int y0, const int x1, const int y1, const int color);
 
 void draw_pixel(const int x, const int y, const int color); // 2D drawing functions
 void draw_circle(const int x, const int y, const int r, const int color);

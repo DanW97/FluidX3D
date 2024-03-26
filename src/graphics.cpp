@@ -66,25 +66,16 @@ void set_light(const uint i, const float3& position) {
 		light_sources_n = max(light_sources_n, i+1u);
 	}
 }
-int lighting(const int color, const float3& p, const float3& normal, const bool translucent=false) {
-	const float snb = sq(normal.x)+sq(normal.y)+sq(normal.z); // only one sqrt instead of two
+int shading(const int color, const float3& p, const float3& normal, const bool translucent=false) {
+	const float nl2 = sq(normal.x)+sq(normal.y)+sq(normal.z); // only one sqrt instead of two
 	float br = 0.0f;
 	for(uint i=0u; i<light_sources_n; i++) {
 		const float3 d = light_sources[i]-p; // direction of light source
-		const float sdb = sq(d.x)+sq(d.y)+sq(d.z);
-		const float nbr = dot(d, normal)/sqrt(snb*sdb);
-		br = fmax(br, translucent ? abs(nbr) : nbr);
+		const float dl2 = sq(d.x)+sq(d.y)+sq(d.z);
+		const float bri = dot(d, normal)/sqrt(nl2*dl2);
+		br = fmax(br, translucent ? fabs(bri) : bri);
 	}
-	br = fmax(0.2f, br);
-	return ::color((int)(br*(float)red(color)), (int)(br*(float)green(color)), (int)(br*(float)blue(color)));
-}
-int color_mix_3(const int c0, const int c1, const int c2, const float w0, const float w1, const float w2) { // w0+w1+w2 = 1
-	const int r0=red(c0), g0=green(c0), b0=blue(c0);
-	const int r1=red(c1), g1=green(c1), b1=blue(c1);
-	const int r2=red(c2), g2=green(c2), b2=blue(c2);
-	const float3 fc0=float3((float)r0, (float)g0, (float)b0),  fc1=float3((float)r1, (float)g1, (float)b1), fc2=float3((float)r2, (float)g2, (float)b2);
-	const float3 fcm = w0*fc0+(w1*fc1+(w2*fc2+float3(0.5f, 0.5f, 0.5f)));
-	return ::color((int)fcm.x, (int)fcm.y, (int)fcm.z);
+	return color_mul(color, fmax(1.25f*br, 0.3f));
 }
 ulong get_font_pixels(const int character) {
 	ulong pixels[224] = { // font data (my own 6x11 monospace font)
@@ -333,6 +324,17 @@ void draw_label(const int x, const int y, const string& s, const int color) {
 		}
 	}
 }
+void draw_line_label(const int x0, const int y0, const int x1, const int y1, const int color) {
+	draw_line(x0, y0, x1, y1, color);
+	if(camera.vr) {
+		if((x0+x1)/2-camera.width/2>0) {
+			draw_line(x0-(int)camera.width/2, y0, x1-(int)camera.width/2, y1, color);
+		}
+		if((x0+x1)/2+(int)camera.width/2<(int)camera.width) {
+			draw_line(x0+(int)camera.width/2, y0, x1+(int)camera.width/2, y1, color);
+		}
+	}
+}
 void draw_bitmap(const int* bitmap) {
 	std::copy(bitmap, bitmap+(int)camera.width*(int)camera.height, camera.bitmap);
 }
@@ -362,7 +364,7 @@ void draw_line(const float3& p0, const float3& p1, const int color) {
 	}
 }
 void draw_triangle(const float3& p0, const float3& p1, const float3& p2, const int color, const bool translucent) { // points clockwise from above
-	const int cl = lighting(color, (p0+p1+p2)/3.0f, cross(p1-p0, p2-p0), translucent);
+	const int cl = shading(color, (p0+p1+p2)/3.0f, cross(p1-p0, p2-p0), translucent);
 	if(!camera.vr) {
 		convert_triangle(p0, p1, p2, cl,  0);
 	} else {
@@ -372,9 +374,9 @@ void draw_triangle(const float3& p0, const float3& p1, const float3& p2, const i
 }
 void draw_triangle(const float3& p0, const float3& p1, const float3& p2, const int c0, const int c1, const int c2, const bool translucent) { // points clockwise from above
 	const float3 normal = cross(p1-p0, p2-p0);
-	const int cl0 = lighting(c0, p0, normal, translucent);
-	const int cl1 = lighting(c1, p1, normal, translucent);
-	const int cl2 = lighting(c2, p2, normal, translucent);
+	const int cl0 = shading(c0, p0, normal, translucent);
+	const int cl1 = shading(c1, p1, normal, translucent);
+	const int cl2 = shading(c2, p2, normal, translucent);
 	if(!camera.vr) {
 		convert_triangle_interpolated(p0, p1, p2, cl0, cl1, cl2,  0);
 	} else {
@@ -478,12 +480,27 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
 		exit(0);
 	} else if(message==WM_MOUSEMOVE) {
 		camera.input_mouse_moved((int)LOWORD(lParam), (int)HIWORD(lParam));
+		if(!camera.lockmouse) SetCursorPos((int)camera.width/2, (int)camera.height/2); // center cursor
 	} else if(message==WM_MOUSEWHEEL) {
 		if((short)HIWORD(wParam)>0) camera.input_scroll_up(); else camera.input_scroll_down();
 	} else if(message==WM_LBUTTONDOWN||message==WM_MBUTTONDOWN||message==WM_RBUTTONDOWN) {
+		if(!camera.lockmouse) {
+			ShowCursor(true); // show cursor
+		} else {
+			ShowCursor(false); // hide cursor
+			SetCursorPos(camera.width/2, camera.height/2); // reset cursor
+		}
 		camera.input_key('U');
 	} else if(message==WM_KEYDOWN) {
 		int key = key_windows((int)wParam);
+		if(key=='U') {
+			if(!camera.lockmouse) {
+				ShowCursor(true); // show cursor
+			} else {
+				ShowCursor(false); // hide cursor
+				SetCursorPos(camera.width/2, camera.height/2); // reset cursor
+			}
+		}
 		camera.set_key_state(key, true);
 		key_bindings(key);
 	} else if(message==WM_KEYUP) {
@@ -544,7 +561,8 @@ INT WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PSTR, _In_
 
 #elif defined(__linux__)||defined(__APPLE__)
 
-#include "X11/include/X11/Xlib.h" // source: libx11-dev
+#include "X11/include/X11/Xlib.h" // sources: libx11-dev, x11proto-dev, libxrandr-dev, libxrender-dev
+#include "X11/include/X11/extensions/Xrandr.h" // for multi-monitor
 
 Display* x11_display;
 Window x11_window;
@@ -604,42 +622,60 @@ void update_frame(const double frametime) {
 	XPutImage(x11_display, x11_window, x11_gc, x11_image, 0, 0, 0, 0, camera.width, camera.height);
 	updating_frame = false;
 	camera.clear_frame(); // clear frame
+	if(!camera.lockmouse) XWarpPointer(x11_display, x11_window, x11_window, 0, 0, camera.width, camera.height, camera.width/2, camera.height/2); // center cursor
+}
+void hide_cursor() {
+	const char zeroes[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+	Pixmap x11_pixmap = XCreateBitmapFromData(x11_display, x11_window, zeroes, 8, 8);
+	XColor black;
+	black.red = black.green = black.blue = 0;
+	Cursor x11_invisible_cursor = XCreatePixmapCursor(x11_display, x11_pixmap, x11_pixmap, &black, &black, 0, 0);
+	XDefineCursor(x11_display, x11_window, x11_invisible_cursor);
+	XFreeCursor(x11_display, x11_invisible_cursor);
+	XFreePixmap(x11_display, x11_pixmap);
+}
+void show_cursor() {
+	Cursor x11_cursor = XCreateFontCursor(x11_display, 68);
+	XDefineCursor(x11_display, x11_window, x11_cursor);
+	XFreeCursor(x11_display, x11_cursor);
 }
 void input_detection() {
-	int last_x=camera.width/2, last_y=camera.height/2;
-	bool mouse_pressed = false;
 	XEvent x11_event;
 	while(running) {
 		if(!updating_frame) {
 			XNextEvent(x11_display, &x11_event);
-			if(x11_event.type==KeyPress) {
-				const int key = key_linux((int)x11_event.xkey.keycode);
-				camera.set_key_state(key, true);
-				key_bindings(key);
-			} else if(x11_event.type==KeyRelease) {
-				const int key = key_linux((int)x11_event.xkey.keycode);
-				camera.set_key_state(key, false);
-			} else if(x11_event.type==ButtonPress) {
+			if(x11_event.type==MotionNotify) {
+				camera.input_mouse_moved((int)x11_event.xmotion.x, (int)x11_event.xmotion.y);
+			} else if(x11_event.type==ButtonPress) { // counterpart: ButtonRelease
 				const int x11_button = x11_event.xbutton.button;
 				if(x11_button==Button4) { // scroll up
 					camera.input_scroll_up();
 				} else if(x11_button==Button5) { // scroll down
 					camera.input_scroll_down();
 				} else {
-					mouse_pressed = true;
-					last_x = (int)x11_event.xmotion.x;
-					last_y = (int)x11_event.xmotion.y;
+					if(!camera.lockmouse) {
+						show_cursor();
+					} else {
+						hide_cursor();
+						XWarpPointer(x11_display, x11_window, x11_window, 0, 0, camera.width, camera.height, (int)camera.width/2, (int)camera.height/2); // reset cursor
+					}
+					camera.input_key('U');
 				}
-			} else if(x11_event.type==ButtonRelease) {
-				mouse_pressed = false;
-			} else if(x11_event.type==MotionNotify) {
-				int new_x = (int)x11_event.xmotion.x;
-				int new_y = (int)x11_event.xmotion.y;
-				if(mouse_pressed) {
-					camera.input_mouse_dragged(new_x-last_x, new_y-last_y);
-					last_x = new_x;
-					last_y = new_y;
+			} else if(x11_event.type==KeyPress) {
+				const int key = key_linux((int)x11_event.xkey.keycode);
+				if(key=='U') {
+					if(!camera.lockmouse) {
+						show_cursor();
+					} else {
+						hide_cursor();
+						XWarpPointer(x11_display, x11_window, x11_window, 0, 0, camera.width, camera.height, (int)camera.width/2, (int)camera.height/2); // reset cursor
+					}
 				}
+				camera.set_key_state(key, true);
+				key_bindings(key);
+			} else if(x11_event.type==KeyRelease) {
+				const int key = key_linux((int)x11_event.xkey.keycode);
+				camera.set_key_state(key, false);
 			}
 		} else {
 			sleep(0.01);
@@ -652,19 +688,33 @@ int main(int argc, char* argv[]) {
 	x11_display = XOpenDisplay(0);
 	if(!x11_display) print_error("No X11 display available.");
 
-	const uint height = 720u; // (uint)DisplayHeight(x11_display, 0);
-	const uint width = height*16u/9u; // (uint)DisplayWidth(x11_display, 0);
+	Window x11_root_window = DefaultRootWindow(x11_display);
+	XRRScreenResources* x11_screen_resources = XRRGetScreenResources(x11_display, x11_root_window);
+	XRROutputInfo* x11_output_info = XRRGetOutputInfo(x11_display, x11_screen_resources, XRRGetOutputPrimary(x11_display, x11_root_window));
+	XRRCrtcInfo* x11_crtc_info = XRRGetCrtcInfo(x11_display, x11_screen_resources, x11_output_info->crtc);
+	const uint width  = (uint)x11_crtc_info->width; // width and height of primary monitor
+	const uint height = (uint)x11_crtc_info->height;
+	const int window_offset_x = (int)x11_crtc_info->x; // offset of primary monitor in multi-monitor coordinates
+	const int window_offset_y = (int)x11_crtc_info->y;
+	XRRFreeCrtcInfo(x11_crtc_info);
+	XRRFreeOutputInfo(x11_output_info);
+	XRRFreeScreenResources(x11_screen_resources);
+
 	camera = Camera(width, height, 60u);
 
-	x11_window = XCreateWindow(x11_display, DefaultRootWindow(x11_display), 0, 0, width, height, 0, CopyFromParent, CopyFromParent, CopyFromParent, 0, 0);
-	XStoreName(x11_display, x11_window, WINDOW_NAME);
-	struct Hints { long flags=2l, functions=0l, decorations=0b0111010l, input_mode=0l, status=0l; } x11_hints; // decorations=maximize|minimize|menu|title|resize|border|all
+	x11_window = XCreateWindow(x11_display, x11_root_window, window_offset_x, window_offset_y, width, height, 0, CopyFromParent, CopyFromParent, CopyFromParent, 0, 0);
+	XSizeHints x11_size_hints = { PPosition|PSize, window_offset_x, window_offset_y, (int)width, (int)height };
+	XSetNormalHints(x11_display, x11_window, &x11_size_hints); // place window on the primary monitor
+	struct Hints { long flags=2l, functions=0l, decorations=0b0000000l, input_mode=0l, status=0l; } x11_hints; // decorations=maximize|minimize|menu|title|resize|border|all
 	Atom x11_property = XInternAtom(x11_display, "_MOTIF_WM_HINTS", 0);
-	XChangeProperty(x11_display, x11_window, x11_property, x11_property, 32, PropModeReplace, (unsigned char*)&x11_hints, 5);
+	XChangeProperty(x11_display, x11_window, x11_property, x11_property, 32, PropModeReplace, (unsigned char*)&x11_hints, 5); // remove window decorations
+	XStoreName(x11_display, x11_window, WINDOW_NAME);
 	XMapRaised(x11_display, x11_window);
 	x11_gc = XCreateGC(x11_display, x11_window, 0, 0);
 	x11_image = XCreateImage(x11_display, CopyFromParent, DefaultDepth(x11_display, DefaultScreen(x11_display)), ZPixmap, 0, (char*)camera.bitmap, width, height, 32, 0);
 	XSelectInput(x11_display, x11_window, KeyPressMask|KeyReleaseMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask);
+	hide_cursor();
+	XWarpPointer(x11_display, None, x11_window, 0, 0, camera.width, camera.height, window_offset_x+(int)camera.width/2, window_offset_y+(int)camera.height/2); // catch cursor from anywhere on monitors
 
 	thread compute_thread(main_physics); // start main_physics() in a new thread
 	thread input_thread(input_detection);
@@ -689,10 +739,12 @@ int main(int argc, char* argv[]) {
 	input_thread.join();
 	return 0;
 }
+
 #endif // Linux
 #endif // INTERACTIVE_GRAPHICS
 
 #ifdef INTERACTIVE_GRAPHICS_ASCII
+
 uint last_textwidth=0u, last_textheight=0u;
 uint fontwidth=8u, fontheight=16u;
 void update_frame(const double frametime) {
@@ -748,9 +800,11 @@ int main(int argc, char* argv[]) {
 	input_thread.join();
 	return 0;
 }
+
 #endif // INTERACTIVE_GRAPHICS_ASCII
 
 #if !defined(INTERACTIVE_GRAPHICS) && !defined(INTERACTIVE_GRAPHICS_ASCII)
+
 int main(int argc, char* argv[]) {
 	main_arguments = get_main_arguments(argc, argv);
 	camera = Camera(GRAPHICS_FRAME_WIDTH, GRAPHICS_FRAME_HEIGHT, 60u); // width and height must be divisible by 8
@@ -764,5 +818,6 @@ int main(int argc, char* argv[]) {
 	compute_thread.join();
 	return 0;
 }
+
 #endif // no INTERACTIVE_GRAPHICS and no INTERACTIVE_GRAPHICS_ASCII
 #endif // GRAPHICS

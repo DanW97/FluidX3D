@@ -23,6 +23,11 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+R(float fast_acos(const float x) { // slightly fastwer approximation
 	return fma(fma(-0.5702f, sq(sq(sq(x))), -1.0f), x, 1.5712963f); // 0.5707964f = (pi-2)/2
 }
+)+R(void swap(float* x, float* y) {
+	const float t = *x;
+	*x = *y;
+	*y = t;
+}
 )+R(void lu_solve(float* M, float* x, float* b, const int N, const int Nsol) { // solves system of N linear equations M*x=b within dimensionality Nsol<=N
 	for(int i=0; i<Nsol; i++) { // decompose M in M=L*U
 		for(int j=i+1; j<Nsol; j++) {
@@ -84,61 +89,22 @@ string opencl_c_container() { return R( // ########################## begin of O
 
 // ################################################## Line3D code ##################################################
 
-// Line3D OpenCL C version (c) Moritz Lehmann
+// Line3D OpenCL C version (c) Dr. Moritz Lehmann
 // draw_point(...)    : draw 3D pixel
 // draw_circle(...)   : draw 3D circle
 // draw_line(...)     : draw 3D line
 // draw_triangle(...) : draw 3D triangle
-// iron_color(...)    : convert float in [0,255] to iron spectrum int color
 // graphics_clear()   : kernel to reset bitmap and zbuffer
 
 )+"#ifdef GRAPHICS"+R(
-)+R(int iron_color(float x) { // coloring scheme (float 0-255 -> int color)
-	x = clamp(360.0f-x*360.0f/255.0f, 0.0f, 360.0f);
-	float r=255.0f, g=0.0f, b=0.0f;
-	if(x<60.0f) { // white - yellow
-		g = 255.0f;
-		b = 255.0f-255.0f*x/60.0f;
-	} else if(x<180.0f) { // yellow - red
-		g = 255.0f-255.0f*(x-60.0f)/120.0f;
-	} else if(x<270.0f) { // red - violet
-		r = 255.0f-255.0f*(x-180.0f)/180.0f;
-		b = 255.0f*(x-180.0f)/90.0f;
-	} else { // violet - black
-		r = 255.0f-255.0f*(x-180.0f)/180.0f;
-		b = 255.0f-255.0f*(x-270.0f)/90.0f;
-	}
-	return (((int)r)<<16)|(((int)g)<<8)|((int)b);
+)+R(int color_from_floats(const float red, const float green, const float blue) {
+	return clamp((int)fma(255.0f, red, 0.5f), 0, 255)<<16|clamp((int)fma(255.0f, green, 0.5f), 0, 255)<<8|clamp((int)fma(255.0f, blue, 0.5f), 0, 255);
 }
-)+R(int rainbow_color(float x) { // coloring scheme (float 0-255 -> int color)
-	x = clamp(360.0f-x*360.0f/255.0f, 0.0f, 360.0f);
-	float r=0.0f, g=0.0f, b=0.0f; // black
-	if(x<60.0f) { // red - yellow
-		r = 255.0f;
-		g = 255.0f*x/60.0f;
-	} else if(x>=60.0f&&x<120.0f) { // yellow - green
-		r = 255.0f-255.0f*(x-60.0f)/60.0f;
-		g = 255.0f;
-	} else if(x>=120.0f&&x<180.0f) { // green - cyan
-		g = 255.0f;
-		b = 255.0f*(x-120.0f)/60.0f;
-	} else if(x>=180.0f&&x<240.0f) { // cyan - blue
-		g = 255.0f-255.0f*(x-180.0f)/60.0f;
-		b = 255.0f;
-	} else if(x>=240.0f&&x<300.0f) { // blue - violet
-		r = (255.0f*(x-240.0f)/60.0f)/2.0f;
-		b = 255.0f;
-	} else { // violet - black
-		r = (255.0f-255.0f*(x-300.0f)/60.0f)/2.0f;
-		b = 255.0f-255.0f*(x-300.0f)/60.0f;
-	}
-	return (((int)r)<<16)|(((int)g)<<8)|((int)b);
-}
-)+R(int color_dim(const int c, const float x) {
-	const int r = clamp((int)fma((float)((c>>16)&255), x, 0.5f), 0, 255);
-	const int g = clamp((int)fma((float)((c>> 8)&255), x, 0.5f), 0, 255);
-	const int b = clamp((int)fma((float)( c     &255), x, 0.5f), 0, 255);
-	return (r&255)<<16|(g&255)<<8|(b&255);
+)+R(int color_mul(const int c, const float x) { // c*x
+	const int r = min((int)fma((float)((c>>16)&255), x, 0.5f), 255);
+	const int g = min((int)fma((float)((c>> 8)&255), x, 0.5f), 255);
+	const int b = min((int)fma((float)( c     &255), x, 0.5f), 255);
+	return r<<16|g<<8|b; // values are already clamped
 }
 )+R(int color_average(const int c1, const int c2) { // (c1+c2)/s
 	const uchar4 cc1=as_uchar4(c1), cc2=as_uchar4(c2);
@@ -167,25 +133,62 @@ string opencl_c_container() { return R( // ########################## begin of O
 	else if(h<240.0f) { g = x; b = c; }
 	else if(h<300.0f) { r = x; b = c; }
 	else if(h<360.0f) { r = c; b = x; }
-	return (int)((r+m)*255.0f)<<16|(int)((g+m)*255.0f)<<8|(int)((b+m)*255.0f);
+	return color_from_floats(r+m, g+m, b+m);
+}
+)+R(int colorscale_rainbow(float x) { // coloring scheme (float [0, 1] -> int color)
+	x = clamp(6.0f*(1.0f-x), 0.0f, 6.0f);
+	float r=0.0f, g=0.0f, b=0.0f; // black
+	if(x<1.2f) { // red - yellow
+		r = 1.0f;
+		g = x*0.83333333f;
+	} else if(x>=1.2f&&x<2.0f) { // yellow - green
+		r = 2.5f-x*1.25f;
+		g = 1.0f;
+	} else if(x>=2.0f&&x<3.0f) { // green - cyan
+		g = 1.0f;
+		b = x-2.0f;
+	} else if(x>=3.0f&&x<4.0f) { // cyan - blue
+		g = 4.0f-x;
+		b = 1.0f;
+	} else if(x>=4.0f&&x<5.0f) { // blue - violet
+		r = x*0.4f-1.6f;
+		b = 3.0f-x*0.5f;
+	} else { // violet - black
+		r = 2.4f-x*0.4f;
+		b = 3.0f-x*0.5f;
+	}
+	return color_from_floats(r, g, b);
+}
+)+R(int colorscale_iron(float x) { // coloring scheme (float [0, 1] -> int color)
+	x = clamp(4.0f*(1.0f-x), 0.0f, 4.0f);
+	float r=1.0f, g=0.0f, b=0.0f;
+	if(x<0.66666667f) { // white - yellow
+		g = 1.0f;
+		b = 1.0f-x*1.5f;
+	} else if(x<2.0f) { // yellow - red
+		g = 1.5f-x*0.75f;
+	} else if(x<3.0f) { // red - violet
+		r = 2.0f-x*0.5f;
+		b = x-2.0f;
+	} else { // violet - black
+		r = 2.0f-x*0.5f;
+		b = 4.0f-x;
+	}
+	return color_from_floats(r, g, b);
+}
+)+R(int colorscale_twocolor(float x) { // coloring scheme (float [0, 1] -> int color)
+	return x>0.5f ? color_mix(0xFFAA00, 0x181818, clamp(2.0f*x-1.0f, 0.0f, 1.0f)) : color_mix(0x181818, 0x0080FF, clamp(2.0f*x, 0.0f, 1.0f)); // red - gray - blue
 }
 )+R(int shading(const int c, const float3 p, const float3 normal, const float* camera_cache) { // calculate flat shading color of triangle
 )+"#ifndef GRAPHICS_TRANSPARENCY"+R(
-	const float dis  = camera_cache[ 1]; // fetch camera parameters (rotation matrix, camera position, etc.)
-	const float posx = camera_cache[ 2]-def_domain_offset_x;
-	const float posy = camera_cache[ 3]-def_domain_offset_y;
-	const float posz = camera_cache[ 4]-def_domain_offset_z;
-	const float Rzx  = camera_cache[11];
-	const float Rzy  = camera_cache[12];
-	const float Rzz  = camera_cache[13];
-	const uchar cr=c>>16&255, cg=c>>8&255, cb=c&255;
+	const float zoom = camera_cache[ 0]; // fetch camera parameters (rotation matrix, camera position, etc.)
+	const float  dis = camera_cache[ 1];
+	const float3 pos = (float3)(camera_cache[ 2], camera_cache[ 3], camera_cache[ 4])-(float3)(def_domain_offset_x, def_domain_offset_y, def_domain_offset_z);
+	const float3 Rz  = (float3)(camera_cache[11], camera_cache[12], camera_cache[13]);
+	const float3 d = p-Rz*(dis/zoom)-pos; // distance vector between p and camera position
 	const float nl2 = sq(normal.x)+sq(normal.y)+sq(normal.z); // only one native_sqrt instead of two
-	const float dx = p.x-fma(Rzx, dis, posx); // direction of light source is viewing direction
-	const float dy = p.y-fma(Rzy, dis, posy);
-	const float dz = p.z-fma(Rzz, dis, posz);
-	const float dl2 = sq(dx)+sq(dy)+sq(dz);
-	const float br = max(1.5f*fabs(normal.x*dx+normal.y*dy+normal.z*dz)*rsqrt(nl2*dl2), 0.3f);
-	return min((int)(br*cr), 255)<<16|min((int)(br*cg), 255)<<8|min((int)(br*cb), 255);
+	const float dl2 = sq(d.x)+sq(d.y)+sq(d.z);
+	return color_mul(c, max(1.5f*fabs(dot(normal, d))*rsqrt(nl2*dl2), 0.3f));
 )+"#else"+R( // GRAPHICS_TRANSPARENCY
 	return c; // disable flat shading, just return input color
 )+"#endif"+R( // GRAPHICS_TRANSPARENCY
@@ -218,30 +221,20 @@ string opencl_c_container() { return R( // ########################## begin of O
 }
 )+R(bool convert(int* rx, int* ry, float* rz, const float3 p, const float* camera_cache, const int stereo) { // 3D -> 2D
 	const float zoom = camera_cache[0]; // fetch camera parameters (rotation matrix, camera position, etc.)
-	const float dis  = camera_cache[1];
-	const float posx = camera_cache[2];
-	const float posy = camera_cache[3];
-	const float posz = camera_cache[4];
-	const float Rxx  = camera_cache[5];
-	const float Rxy  = camera_cache[6];
-	const float Rxz  = camera_cache[7];
-	const float Ryx  = camera_cache[8];
-	const float Ryy  = camera_cache[9];
-	const float Ryz  = camera_cache[10];
-	const float Rzx  = camera_cache[11];
-	const float Rzy  = camera_cache[12];
-	const float Rzz  = camera_cache[13];
+	const float  dis = camera_cache[1];
+	const float3 pos = (float3)(camera_cache[ 2], camera_cache[ 3], camera_cache[ 4])-(float3)(def_domain_offset_x, def_domain_offset_y, def_domain_offset_z);
+	const float3 Rx  = (float3)(camera_cache[ 5], camera_cache[ 6], camera_cache[ 7]);
+	const float3 Ry  = (float3)(camera_cache[ 8], camera_cache[ 9], camera_cache[10]);
+	const float3 Rz  = (float3)(camera_cache[11], camera_cache[12], camera_cache[13]);
 	const float eye_distance = vload_half(28, (half*)camera_cache);
 	float3 t, r;
-	t.x = p.x+def_domain_offset_x-posx-(float)stereo*eye_distance/zoom*Rxx; // transformation
-	t.y = p.y+def_domain_offset_y-posy-(float)stereo*eye_distance/zoom*Rxy;
-	t.z = p.z+def_domain_offset_z-posz;
-	r.z = Rzx*t.x+Rzy*t.y+Rzz*t.z; // z-position for z-buffer
+	t = p-pos-((float)stereo*eye_distance/zoom)*(float3)(Rx.x, Rx.y, 0.0f); // transformation
+	r.z = dot(Rz, t); // z-position for z-buffer
 	const float rs = zoom*dis/(dis-r.z*zoom); // perspective (reciprocal is more efficient)
 	if(rs<=0.0f) return false; // point is behins camera
 	const float tv = ((as_int(camera_cache[14])>>30)&0x1)&&stereo!=0 ? 0.5f : 1.0f;
-	r.x = ((Rxx*t.x+Rxy*t.y+Rxz*t.z)*rs+(float)stereo*eye_distance)*tv+(0.5f+(float)stereo*0.25f)*(float)def_screen_width; // x position on screen
-	r.y =  (Ryx*t.x+Ryy*t.y+Ryz*t.z)*rs+0.5f*(float)def_screen_height; // y position on screen
+	r.x = (dot(Rx, t)*rs+(float)stereo*eye_distance)*tv+(0.5f+(float)stereo*0.25f)*(float)def_screen_width; // x position on screen
+	r.y =  dot(Ry, t)*rs+0.5f*(float)def_screen_height; // y position on screen
 	*rx = (int)(r.x+0.5f);
 	*ry = (int)(r.y+0.5f);
 	*rz = r.z;
@@ -296,7 +289,8 @@ string opencl_c_container() { return R( // ########################## begin of O
 	int r0x, r0y, r1x, r1y, r2x, r2y; float r0z, r1z, r2z;
 	if(convert(&r0x, &r0y, &r0z, p0, camera_cache, stereo) && convert(&r1x, &r1y, &r1z, p1, camera_cache, stereo) && convert(&r2x, &r2y, &r2z, p2, camera_cache, stereo)
 		&& !(is_off_screen(r0x, r0y, stereo) && is_off_screen(r1x, r1y, stereo) && is_off_screen(r2x, r2y, stereo))) { // cancel drawing if all points are off screen
-		if(r0x*(r1y-r2y)+r1x*(r2y-r0y)+r2x*(r0y-r1y)>100000 || (r0y==r1y&&r0y==r2y)) return; // return for large triangle area or degenerate triangles
+		if(r0x*(r1y-r2y)+r1x*(r2y-r0y)+r2x*(r0y-r1y)>40000 || (r0y==r1y&&r0y==r2y)) return; // return for large triangle area or degenerate triangles
+		//if(r1x*r0y+r2x*r1y+r0x*r2y>=r0x*r1y+r1x*r2y+r2x*r0y) return; // clockwise backface culling
 		if(r0y>r1y) { const int xt = r0x; const int yt = r0y; r0x = r1x; r0y = r1y; r1x = xt; r1y = yt; } // sort vertices ascending by y
 		if(r0y>r2y) { const int xt = r0x; const int yt = r0y; r0x = r2x; r0y = r2y; r2x = xt; r2y = yt; }
 		if(r1y>r2y) { const int xt = r1x; const int yt = r1y; r1x = r2x; r1y = r2y; r2x = xt; r2y = yt; }
@@ -321,7 +315,8 @@ string opencl_c_container() { return R( // ########################## begin of O
 	int r0x, r0y, r1x, r1y, r2x, r2y; float r0z, r1z, r2z;
 	if(convert(&r0x, &r0y, &r0z, p0, camera_cache, stereo) && convert(&r1x, &r1y, &r1z, p1, camera_cache, stereo) && convert(&r2x, &r2y, &r2z, p2, camera_cache, stereo)
 		&& !(is_off_screen(r0x, r0y, stereo) && is_off_screen(r1x, r1y, stereo) && is_off_screen(r2x, r2y, stereo))) { // cancel drawing if all points are off screen
-		if(r0x*(r1y-r2y)+r1x*(r2y-r0y)+r2x*(r0y-r1y)>100000 || (r0y==r1y&&r0y==r2y)) return; // return for large triangle area or degenerate triangles
+		if(r0x*(r1y-r2y)+r1x*(r2y-r0y)+r2x*(r0y-r1y)>40000 || (r0y==r1y&&r0y==r2y)) return; // return for large triangle area or degenerate triangles
+		//if(r1x*r0y+r2x*r1y+r0x*r2y>=r0x*r1y+r1x*r2y+r2x*r0y) return; // clockwise backface culling
 		if(r0y>r1y) { const int xt = r0x; const int yt = r0y; r0x = r1x; r0y = r1y; r1x = xt; r1y = yt; const int ct = c0; c0 = c1; c1 = ct; } // sort vertices ascending by y
 		if(r0y>r2y) { const int xt = r0x; const int yt = r0y; r0x = r2x; r0y = r2y; r2x = xt; r2y = yt; const int ct = c0; c0 = c2; c2 = ct; }
 		if(r1y>r2y) { const int xt = r1x; const int yt = r1y; r1x = r2x; r1y = r2y; r2x = xt; r2y = yt; const int ct = c1; c1 = c2; c2 = ct; }
@@ -517,17 +512,17 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+R(float intersect_triangle(const ray r, const float3 p0, const float3 p1, const float3 p2) { // Moeller-Trumbore algorithm
 	const float3 u=p1-p0, v=p2-p0, w=r.origin-p0, h=cross(r.direction, v), q=cross(w, u);
 	const float f=1.0f/dot(u, h), s=f*dot(w, h), t=f*dot(r.direction, q);
-	return (f<0.0f||s<0.0f||s>1.0f||t<0.0f||s+t>1.0f) ? -1.0f : f*dot(v, q);
+	return (f<0.0f||s<-0.001f||s>1.001f||t<-0.001f||s+t>1.001f) ? -1.0f : f*dot(v, q); // add 1E-3f tolerance values to avoid graphical artifacts with axis-aligned camera
 }
 )+R(float intersect_triangle_bidirectional(const ray r, const float3 p0, const float3 p1, const float3 p2) { // Moeller-Trumbore algorithm
 	const float3 u=p1-p0, v=p2-p0, w=r.origin-p0, h=cross(r.direction, v), q=cross(w, u);
 	const float f=1.0f/dot(u, h), s=f*dot(w, h), t=f*dot(r.direction, q);
-	return (s<0.0f||s>1.0f||t<0.0f||s+t>1.0f) ? -1.0f : f*dot(v, q);
+	return (s<-0.001f||s>1.001f||t<-0.001f||s+t>1.001f) ? -1.0f : f*dot(v, q); // add 1E-3f tolerance values to avoid graphical artifacts with axis-aligned camera
 }
 )+R(float intersect_rhombus(const ray r, const float3 p0, const float3 p1, const float3 p2) { // Moeller-Trumbore algorithm
 	const float3 u=p1-p0, v=p2-p0, w=r.origin-p0, h=cross(r.direction, v), q=cross(w, u);
 	const float f=1.0f/dot(u, h), s=f*dot(w, h), t=f*dot(r.direction, q);
-	return (f<0.0f||s<0.0f||s>1.0f||t<0.0f||t>1.0f) ? -1.0f : f*dot(v, q);
+	return (f<0.0f||s<-0.001f||s>1.001f||t<-0.001f||t>1.001f) ? -1.0f : f*dot(v, q); // add 1E-3f tolerance values to avoid graphical artifacts with axis-aligned camera
 }
 )+R(float intersect_plane(const ray r, const float3 p0, const float3 p1, const float3 p2) { // ray-triangle intersection, but skip barycentric coordinates
 	const float3 u=p1-p0, v=p2-p0, w=r.origin-p0, h=cross(r.direction, v);
@@ -618,35 +613,19 @@ string opencl_c_container() { return R( // ########################## begin of O
 }
 )+R(ray get_camray(const int x, const int y, const float* camera_cache) {
 	const float zoom = camera_cache[0]; // fetch camera parameters (rotation matrix, camera position, etc.)
-	const float dis  = camera_cache[1];
-	const float posx = camera_cache[2];
-	const float posy = camera_cache[3];
-	const float posz = camera_cache[4];
-	const float Rxx  = camera_cache[5];
-	const float Rxy  = camera_cache[6];
-	const float Rxz  = camera_cache[7];
-	const float Ryx  = camera_cache[8];
-	const float Ryy  = camera_cache[9];
-	const float Ryz  = camera_cache[10];
-	const float Rzx  = camera_cache[11];
-	const float Rzy  = camera_cache[12];
-	const float Rzz  = camera_cache[13];
-	const bool  vr  = (as_int(camera_cache[14])>>31)&0x1;
-	const float rtv = (as_int(camera_cache[14])>>30)&0x1 ? 2.0f : 1.0f;
-	const float eye_distance = vload_half(28, (half*)camera_cache);
-	const float stereo = (x<(int)def_screen_width/2 ? -1.0f : 1.0f);
+	const float  dis = camera_cache[1];
+	const float3 pos = (float3)(camera_cache[ 2], camera_cache[ 3], camera_cache[ 4])-(float3)(def_domain_offset_x, def_domain_offset_y, def_domain_offset_z);
+	const float3 Rx  = (float3)(camera_cache[ 5], camera_cache[ 6], camera_cache[ 7]);
+	const float3 Ry  = (float3)(camera_cache[ 8], camera_cache[ 9], camera_cache[10]);
+	const float3 Rz  = (float3)(camera_cache[11], camera_cache[12], camera_cache[13]);
+	const bool   vr  = (as_int(camera_cache[14])>>31)&0x1;
+	const float  rtv = (as_int(camera_cache[14])>>30)&0x1 ? 2.0f : 1.0f;
+	const float  eye_distance = vload_half(28, (half*)camera_cache);
+	const float  stereo = (x<(int)def_screen_width/2 ? -1.0f : 1.0f);
 	float3 p0 = (float3)(!vr ? 0.0f : stereo*eye_distance/zoom, 0.0f, dis/zoom);
 	float3 p1 = p0+normalize((float3)(!vr ? (float)(x-(int)def_screen_width/2) : ((float)(x-(int)def_screen_width/2)-stereo*(float)(def_screen_width/4u))*rtv-stereo*eye_distance, (float)(y-(int)def_screen_height/2), -dis));
-	const float x0 = Rxx*p0.x+Ryx*p0.y+Rzx*p0.z; // reverse rotate p0
-	const float y0 = Rxy*p0.x+Ryy*p0.y+Rzy*p0.z;
-	const float z0 = Rxz*p0.x+Ryz*p0.y+Rzz*p0.z;
-	const float x1 = Rxx*p1.x+Ryx*p1.y+Rzx*p1.z; // reverse rotate p1
-	const float y1 = Rxy*p1.x+Ryy*p1.y+Rzy*p1.z;
-	const float z1 = Rxz*p1.x+Ryz*p1.y+Rzz*p1.z;
-	p0 = (float3)(x0, y0, z0)-(float3)(def_domain_offset_x, def_domain_offset_y, def_domain_offset_z);
-	p1 = (float3)(x1, y1, z1)-(float3)(def_domain_offset_x, def_domain_offset_y, def_domain_offset_z);
-	p0.x=p0.x+posx; p0.y=p0.y+posy; p0.z=p0.z+posz; // reverse transformation of p0
-	p1.x=p1.x+posx; p1.y=p1.y+posy; p1.z=p1.z+posz; // reverse transformation of p1
+	p0 = Rx*p0.x+Ry*p0.y+Rz*p0.z+pos; // reverse rotation and reverse transformation of p0
+	p1 = Rx*p1.x+Ry*p1.y+Rz*p1.z+pos; // reverse rotation and reverse transformation of p1
 	ray camray;
 	camray.origin = p0;
 	camray.direction = p1-p0;
@@ -669,7 +648,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	}
 }
 )+R(int skybox_color_bw(const float x, const float y) {
-	return color_dim(0xFFFFFF, 1.0f-y);
+	return color_mul(0xFFFFFF, 1.0f-y);
 }
 )+R(int skybox_color_hsv(const float x, const float y) {
 	const float h = fmod(x*360.0f+120.0f, 360.0f);
@@ -718,7 +697,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float tmy = tdy*(dy>0 ? 1.0f-fya : fya);
 	float tmz = tdz*(dz>0 ? 1.0f-fza : fza);
 	uchar flags_cell = 0u;
-	while(true) {
+	for(uint tc=0u; tc<Nx+Ny+Nz; tc++) { // limit number of traversed cells to space diagonal
 		if(tmx<tmy) {
 			if(tmx<tmz) { xyz.x += dx; tmx += tdx; } else { xyz.z += dz; tmz += tdz; }
 		} else {
@@ -838,19 +817,37 @@ string opencl_c_container() { return R( // ########################## begin of O
 	return dot(point-plane_p, plane_n)<=0.0f;
 }
 )+R(bool is_in_camera_frustrum(const float3 p, const float* camera_cache) { // returns true if point is located in camera frustrum
-	const float vr = (float)((as_int(camera_cache[14])>>31)&0x1);
-	const ray r00 = get_camray(0,                       0                       , camera_cache); // get 4 edge vectors of frustrum
-	const ray r01 = get_camray((int)def_screen_width-1, 0                       , camera_cache);
-	const ray r10 = get_camray(0,                       (int)def_screen_height-1, camera_cache);
-	const ray r11 = get_camray((int)def_screen_width-1, (int)def_screen_height-1, camera_cache);
-	const float3 plane_n_top    = cross(r00.direction, r01.direction); // get 4 frustrum planes
-	const float3 plane_n_bottom = cross(r11.direction, r10.direction);
-	const float3 plane_n_left   = cross(r10.direction, r00.direction);
-	const float3 plane_n_right  = cross(r01.direction, r11.direction);
-	const float3 plane_p_top    = r00.origin-2.0f*plane_n_top; // move frustrum planes outward by 2 units
-	const float3 plane_p_bottom = r11.origin-2.0f*plane_n_bottom;
-	const float3 plane_p_left   = r00.origin-(2.0f+16.0f*vr)*plane_n_left; // move frustrum planes outward by 2 units, for stereoscopic rendering a bit more
-	const float3 plane_p_right  = r11.origin-(2.0f+16.0f*vr)*plane_n_right;
+	const float zoom = camera_cache[0]; // fetch camera parameters (rotation matrix, camera position, etc.)
+	const float  dis = camera_cache[1];
+	const float3 pos = (float3)(camera_cache[ 2], camera_cache[ 3], camera_cache[ 4])-(float3)(def_domain_offset_x, def_domain_offset_y, def_domain_offset_z);
+	const float3 Rx  = (float3)(camera_cache[ 5], camera_cache[ 6], camera_cache[ 7]);
+	const float3 Ry  = (float3)(camera_cache[ 8], camera_cache[ 9], camera_cache[10]);
+	const float3 Rz  = (float3)(camera_cache[11], camera_cache[12], camera_cache[13]);
+	const bool   vr  = (as_int(camera_cache[14])>>31)&0x1;
+	const float  rtv = (as_int(camera_cache[14])>>30)&0x1 ? 2.0f : 1.0f;
+	const float3 p0 = (float3)(0.0f, 0.0f, dis/zoom);
+	const float3 camera_center = Rx*p0.x+Ry*p0.y+Rz*p0.z+pos; // reverse rotation and reverse transformation of p0
+	const float x_left   = !vr ? (float)(-(int)def_screen_width/2  ) : ((float)(-(int)def_screen_width/2  )+(float)(def_screen_width/4u))*rtv;
+	const float x_right  = !vr ? (float)( (int)def_screen_width/2-1) : ((float)( (int)def_screen_width/2-1)-(float)(def_screen_width/4u))*rtv;
+	const float y_top    = (float)(-(int)def_screen_height/2 );
+	const float y_bottom = (float)((int)def_screen_height/2-1);
+	const float dis_clamped = fmin(dis, 1E4f); // avoid flickering at very small field of view
+	float3 r00 = p0+normalize((float3)(x_left , y_top   , -dis_clamped)); // get 4 edge vectors of frustrum, get_camray(...) inlined and redundant parts eliminated
+	float3 r01 = p0+normalize((float3)(x_right, y_top   , -dis_clamped));
+	float3 r10 = p0+normalize((float3)(x_left , y_bottom, -dis_clamped));
+	float3 r11 = p0+normalize((float3)(x_right, y_bottom, -dis_clamped));
+	r00 = Rx*r00.x+Ry*r00.y+Rz*r00.z+pos-camera_center; // reverse rotation and reverse transformation of r00
+	r01 = Rx*r01.x+Ry*r01.y+Rz*r01.z+pos-camera_center; // reverse rotation and reverse transformation of r01
+	r10 = Rx*r10.x+Ry*r10.y+Rz*r10.z+pos-camera_center; // reverse rotation and reverse transformation of r10
+	r11 = Rx*r11.x+Ry*r11.y+Rz*r11.z+pos-camera_center; // reverse rotation and reverse transformation of r11
+	const float3 plane_n_top    = cross(r00, r01); // get 4 frustrum planes
+	const float3 plane_n_bottom = cross(r11, r10);
+	const float3 plane_n_left   = cross(r10, r00);
+	const float3 plane_n_right  = cross(r01, r11);
+	const float3 plane_p_top    = camera_center-2.0f*plane_n_top; // move frustrum planes outward by 2 units
+	const float3 plane_p_bottom = camera_center-2.0f*plane_n_bottom;
+	const float3 plane_p_left   = camera_center-(2.0f+8.0f*(float)vr)*plane_n_left; // move frustrum planes outward by 2 units, for stereoscopic rendering a bit more
+	const float3 plane_p_right  = camera_center-(2.0f+8.0f*(float)vr)*plane_n_right;
 	return is_above_plane(p, plane_p_top, plane_n_top)&&is_above_plane(p, plane_p_bottom, plane_n_bottom)&&is_above_plane(p, plane_p_left, plane_n_left)&&is_above_plane(p, plane_p_right, plane_n_right);
 }
 )+"#endif"+R( // GRAPHICS
@@ -2377,6 +2374,19 @@ string opencl_c_container() { return R( // ########################## begin of O
 	insert_gi(a, index_insert_p(a, direction), 2u*direction+0u, t, transfer_buffer_p, gi);
 	insert_gi(a, index_insert_m(a, direction), 2u*direction+1u, t, transfer_buffer_m, gi);
 }
+
+)+R(kernel void transfer_extract_T(const uint direction, const ulong t, global float* transfer_buffer_p, global float* transfer_buffer_m, const global float* T) {
+	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
+	if(a>=A) return; // area might not be a multiple of def_workgroup_size, so return here to avoid writing in unallocated memory space
+	transfer_buffer_p[a] = T[index_extract_p(a, direction)];
+	transfer_buffer_m[a] = T[index_extract_m(a, direction)];
+}
+)+R(kernel void transfer__insert_T(const uint direction, const ulong t, const global float* transfer_buffer_p, const global float* transfer_buffer_m, global float* T) {
+	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
+	if(a>=A) return; // area might not be a multiple of def_workgroup_size, so return here to avoid writing in unallocated memory space
+	T[index_insert_p(a, direction)] = transfer_buffer_p[a];
+	T[index_insert_m(a, direction)] = transfer_buffer_m[a];
+}
 )+"#endif"+R( // TEMPERATURE
 
 
@@ -2412,7 +2422,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 				intersections_check++; // cast a second ray to check if starting point is really inside (error correction)
 			}
 		}
-	} /**/
+	}
 
 	for(int i=1; i<(int)intersections; i++) { // insertion-sort distances
 		ushort t = distances[i];
@@ -2427,7 +2437,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	const bool set_u = sq(ux)+sq(uy)+sq(uz)+sq(rx)+sq(ry)+sq(rz)>0.0f;
 	uint intersection = intersections%2u!=intersections_check%2u; // iterate through column, start with 0 regularly, start with 1 if forward and backward intersection count evenness differs (error correction)
 	const uint h0 = direction==0u ? xyz.x : direction==1u ? xyz.y : xyz.z;
-	const uint hmax = direction==0u ? (uint)clamp((int)x1-def_Ox, 0, (int)def_Nx-1) : direction==1u ? (uint)clamp((int)y1-def_Oy, 0, (int)def_Ny-1) : (uint)clamp((int)z1-def_Oz, 0, (int)def_Nz-1);
+	const uint hmax = direction==0u ? (uint)clamp((int)x1-def_Ox, 0, (int)def_Nx) : direction==1u ? (uint)clamp((int)y1-def_Oy, 0, (int)def_Ny) : (uint)clamp((int)z1-def_Oz, 0, (int)def_Nz);
 	const uint hmesh = h0+(uint)distances[intersections-1u];
 	for(uint h=h0; h<hmax; h++) {
 		while(intersection<intersections&&h>h0+(uint)distances[intersection]) {
@@ -2480,9 +2490,9 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef GRAPHICS"+R(
 
 )+"#ifndef FORCE_FIELD"+R( // render flags as grid
-)+R(kernel void graphics_flags(const global uchar* flags, const global float* camera, global int* bitmap, global int* zbuffer) {
+)+R(kernel void graphics_flags(const global float* camera, global int* bitmap, global int* zbuffer, const global uchar* flags) {
 )+"#else"+R( // FORCE_FIELD
-)+R(kernel void graphics_flags(const global uchar* flags, const global float* camera, global int* bitmap, global int* zbuffer, const global float* F) {
+)+R(kernel void graphics_flags(const global float* camera, global int* bitmap, global int* zbuffer, const global uchar* flags, const global float* F) {
 )+"#endif"+R( // FORCE_FIELD
 	const uint n = get_global_id(0);
 	if(n>=(uint)def_N||is_halo(n)) return; // don't execute graphics_flags() on halo
@@ -2492,10 +2502,11 @@ string opencl_c_container() { return R( // ########################## begin of O
 	//if(flagsn&TYPE_SU) return; // don't draw surface
 	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
 	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
-	uint x0, xp, xm, y0, yp, ym, z0, zp, zm;
-	calculate_indices(n, &x0, &xp, &xm, &y0, &yp, &ym, &z0, &zp, &zm);
 	const uint3 xyz = coordinates(n);
 	const float3 p = position(xyz);
+	if(!is_in_camera_frustrum(p, camera_cache)) return; // skip loading LBM data if grid cell is not visible
+	uint x0, xp, xm, y0, yp, ym, z0, zp, zm;
+	calculate_indices(n, &x0, &xp, &xm, &y0, &yp, &ym, &z0, &zp, &zm);
 	const int c =  // coloring scheme
 		flagsn_bo==TYPE_S ? COLOR_S : // solid boundary
 		((flagsn&TYPE_T)&&flagsn_bo==TYPE_E) ? color_average(COLOR_T, COLOR_E) : // both temperature boundary and equilibrium boundary
@@ -2541,7 +2552,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 		const float3 Fn = def_scale_F*(float3)(F[n], F[def_N+(ulong)n], F[2ul*def_N+(ulong)n]);
 		const float Fnl = length(Fn);
 		if(Fnl>0.0f) {
-			const int c = iron_color(255.0f*Fnl); // color boundaries depending on the force on them
+			const int c = colorscale_iron(Fnl); // color boundaries depending on the force on them
 			draw_line(p, p+Fn, c, camera_cache, bitmap, zbuffer); // draw colored force vectors
 		}
 	}
@@ -2549,15 +2560,19 @@ string opencl_c_container() { return R( // ########################## begin of O
 }
 
 )+"#ifndef FORCE_FIELD"+R( // render solid boundaries with marching-cubes
-)+R(kernel void graphics_flags_mc(const global uchar* flags, const global float* camera, global int* bitmap, global int* zbuffer) {
+)+R(kernel void graphics_flags_mc(const global float* camera, global int* bitmap, global int* zbuffer, const global uchar* flags) {
 )+"#else"+R( // FORCE_FIELD
-)+R(kernel void graphics_flags_mc(const global uchar* flags, const global float* camera, global int* bitmap, global int* zbuffer, const global float* F) {
+)+R(kernel void graphics_flags_mc(const global float* camera, global int* bitmap, global int* zbuffer, const global uchar* flags, const global float* F) {
 )+"#endif"+R( // FORCE_FIELD
 	const uint n = get_global_id(0);
 	if(n>=(uint)def_N||is_halo(n)) return; // don't execute graphics_flags() on halo
 	const uint3 xyz = coordinates(n);
 	if(xyz.x>=def_Nx-1u||xyz.y>=def_Ny-1u||xyz.z>=def_Nz-1u) return;
 	//if(xyz.x==0u||xyz.y==0u||xyz.z==0u||xyz.x>=def_Nx-2u||xyz.y>=def_Ny-2u||xyz.z>=def_Nz-2u) return;
+	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
+	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
+	const float3 p = position(xyz);
+	if(!is_in_camera_frustrum(p, camera_cache)) return; // skip loading LBM data if grid cell is not visible
 	uint j[8];
 	const uint x0 =  xyz.x; // cube stencil
 	const uint xp =  xyz.x+1u;
@@ -2578,9 +2593,6 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float3 triangles[15]; // maximum of 5 triangles with 3 vertices each
 	const uint tn = marching_cubes(v, 0.5f, triangles); // run marching cubes algorithm
 	if(tn==0u) return;
-	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
-	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
-	const float3 offset = (float3)((float)xyz.x+0.5f-0.5f*(float)def_Nx, (float)xyz.y+0.5f-0.5f*(float)def_Ny, (float)xyz.z+0.5f-0.5f*(float)def_Nz);
 )+"#ifdef FORCE_FIELD"+R(
 	float3 Fj[8];
 	for(uint i=0u; i<8u; i++) Fj[i] = v[i]==1.0f ? (float3)(F[j[i]], F[def_N+(ulong)j[i]], F[2ul*def_N+(ulong)j[i]]) : (float3)(0.0f, 0.0f, 0.0f);
@@ -2594,52 +2606,126 @@ string opencl_c_container() { return R( // ########################## begin of O
 		int c0, c1, c2; {
 			const float x1=p0.x, y1=p0.y, z1=p0.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
 			const float3 Fi = (x0*y0*z0)*Fj[0]+(x1*y0*z0)*Fj[1]+(x1*y0*z1)*Fj[2]+(x0*y0*z1)*Fj[3]+(x0*y1*z0)*Fj[4]+(x1*y1*z0)*Fj[5]+(x1*y1*z1)*Fj[6]+(x0*y1*z1)*Fj[7]; // perform trilinear interpolation
-			c0 = shading(rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal)), p0+offset, normal, camera_cache); // rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal));
+			c0 = shading(colorscale_twocolor(0.5f+def_scale_F*dot(Fi, normal)), p+p0, normal, camera_cache); // colorscale_twocolor(0.5f+def_scale_F*dot(Fi, normal));
 		} {
 			const float x1=p1.x, y1=p1.y, z1=p1.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
 			const float3 Fi = (x0*y0*z0)*Fj[0]+(x1*y0*z0)*Fj[1]+(x1*y0*z1)*Fj[2]+(x0*y0*z1)*Fj[3]+(x0*y1*z0)*Fj[4]+(x1*y1*z0)*Fj[5]+(x1*y1*z1)*Fj[6]+(x0*y1*z1)*Fj[7]; // perform trilinear interpolation
-			c1 = shading(rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal)), p1+offset, normal, camera_cache); // rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal));
+			c1 = shading(colorscale_twocolor(0.5f+def_scale_F*dot(Fi, normal)), p+p1, normal, camera_cache); // colorscale_twocolor(0.5f+def_scale_F*dot(Fi, normal));
 		} {
 			const float x1=p2.x, y1=p2.y, z1=p2.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
 			const float3 Fi = (x0*y0*z0)*Fj[0]+(x1*y0*z0)*Fj[1]+(x1*y0*z1)*Fj[2]+(x0*y0*z1)*Fj[3]+(x0*y1*z0)*Fj[4]+(x1*y1*z0)*Fj[5]+(x1*y1*z1)*Fj[6]+(x0*y1*z1)*Fj[7]; // perform trilinear interpolation
-			c2 = shading(rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal)), p2+offset, normal, camera_cache); // rainbow_color(191.0f+255.0f*def_scale_F*dot(Fi, normal));
+			c2 = shading(colorscale_twocolor(0.5f+def_scale_F*dot(Fi, normal)), p+p2, normal, camera_cache); // colorscale_twocolor(0.5f+def_scale_F*dot(Fi, normal));
 		}
-		draw_triangle_interpolated(p0+offset, p1+offset, p2+offset, c0, c1, c2, camera_cache, bitmap, zbuffer); // draw triangle with interpolated colors
+		draw_triangle_interpolated(p+p0, p+p1, p+p2, c0, c1, c2, camera_cache, bitmap, zbuffer); // draw triangle with interpolated colors
 )+"#else"+R( // FORCE_FIELD
-		const int c = shading(0xDFDFDF, (p0+p1+p2)/3.0f+offset, normal, camera_cache); // 0xDFDFDF;
-		draw_triangle(p0+offset, p1+offset, p2+offset, c, camera_cache, bitmap, zbuffer);
+		const int c0 = shading(0xDFDFDF, p+p0, normal, camera_cache);
+		const int c1 = shading(0xDFDFDF, p+p1, normal, camera_cache);
+		const int c2 = shading(0xDFDFDF, p+p2, normal, camera_cache);
+		draw_triangle_interpolated(p+p0, p+p1, p+p2, c0, c1, c2, camera_cache, bitmap, zbuffer);
 )+"#endif"+R( // FORCE_FIELD
 	}
 }
 
-)+R(kernel void graphics_field(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer, const int slice_mode, const int slice_x, const int slice_y, const int slice_z) {
+)+"#ifndef TEMPERATURE"+R(
+)+R(kernel void graphics_field(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const global float* rho, const global float* u, const global uchar* flags) {
+)+"#else"+R( // TEMPERATURE
+)+R(kernel void graphics_field(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const global float* rho, const global float* u, const global uchar* flags, const global float* T) {
+)+"#endif"+R( // TEMPERATURE
 	const uint n = get_global_id(0);
 	if(n>=(uint)def_N||is_halo(n)) return; // don't execute graphics_field() on halo
 	const uint3 xyz = coordinates(n);
-	const bool rx=(int)xyz.x!=slice_x, ry=(int)xyz.y!=slice_y, rz=(int)xyz.z!=slice_z;
-	if((slice_mode==1&&rx)||(slice_mode==2&&ry)||(slice_mode==3&&rz)||(slice_mode==4&&rx&&rz)||(slice_mode==5&&rx&&ry&&rz)||(slice_mode==6&&ry&&rz)||(slice_mode==7&&rx&&ry)) return;
+	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
+	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
+	const float3 p = position(xyz);
+	if(!is_in_camera_frustrum(p, camera_cache)) return; // skip loading LBM data if grid cell is not visible
 )+"#ifndef MOVING_BOUNDARIES"+R(
 	if(flags[n]&(TYPE_S|TYPE_E|TYPE_I|TYPE_G)) return;
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flags[n]&(TYPE_I|TYPE_G)) return;
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
-	float3 un = load_u(n, u); // cache velocity
+	const float3 un = load_u(n, u); // cache velocity
 	const float ul = length(un);
 	if(def_scale_u*ul<0.1f) return; // don't draw lattice points where the velocity is lower than this threshold
-	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
-	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
-	const float3 p = position(coordinates(n));
-	const int c = iron_color(255.0f*def_scale_u*ul); // coloring by velocity
+	int c = 0; // coloring
+	switch(field_mode) {
+		case 0: c = colorscale_rainbow(def_scale_u*ul); break; // coloring by velocity
+		case 1: c = colorscale_twocolor(0.5f+def_scale_rho*(rho[n]-1.0f)); break; // coloring by density
+)+"#ifdef TEMPERATURE"+R(
+		case 2: c = colorscale_iron(0.5f+def_scale_T*(T[n]-def_T_avg)); break; // coloring by temperature
+)+"#endif"+R( // TEMPERATURE
+	}
 	draw_line(p-(0.5f/ul)*un, p+(0.5f/ul)*un, c, camera_cache, bitmap, zbuffer);
 }
 
-)+"#ifndef GRAPHICS_TEMPERATURE"+R(
-)+R(kernel void graphics_streamline(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer, const int slice_mode, const int slice_x, const int slice_y, const int slice_z) {
-)+"#else"+R( // GRAPHICS_TEMPERATURE
-)+R(kernel void graphics_streamline(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer, const int slice_mode, const int slice_x, const int slice_y, const int slice_z, const global float* T) {
-)+"#endif"+R( // GRAPHICS_TEMPERATURE
+)+"#ifndef TEMPERATURE"+R(
+)+R(kernel void graphics_field_slice(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const int slice_mode, const int slice_x, const int slice_y, const int slice_z, const global float* rho, const global float* u, const global uchar* flags) {
+)+"#else"+R( // TEMPERATURE
+)+R(kernel void graphics_field_slice(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const int slice_mode, const int slice_x, const int slice_y, const int slice_z, const global float* rho, const global float* u, const global uchar* flags, const global float* T) {
+)+"#endif"+R( // TEMPERATURE
+	const uint a = get_global_id(0);
+	const uint direction = (uint)clamp(slice_mode-1, 0, 2);
+	if(a>=get_area(direction)||slice_mode<1||slice_mode>3||(slice_mode==1&&(slice_x<0||slice_x>=(int)def_Nx))||(slice_mode==2&&(slice_y<0||slice_y>=(int)def_Ny))||(slice_mode==3&&(slice_z<0||slice_z>=(int)def_Nz))) return;
+	uint3 xyz00, xyz01, xyz10, xyz11;
+	float3 normal;
+	switch(direction) {
+		case 0u: xyz00 = (uint3)((uint)slice_x, a%def_Ny, a/def_Ny); if(xyz00.y>=def_Ny-1u||xyz00.z>=def_Nz-1u) return; xyz01 = xyz00+(uint3)(0u, 0u, 1u); xyz10 = xyz00+(uint3)(0u, 1u, 0u); xyz11 = xyz00+(uint3)(0u, 1u, 1u); normal = (float3)(1.0f, 0.0f, 0.0f); break;
+		case 1u: xyz00 = (uint3)(a/def_Nz, (uint)slice_y, a%def_Nz); if(xyz00.x>=def_Nx-1u||xyz00.z>=def_Nz-1u) return; xyz01 = xyz00+(uint3)(0u, 0u, 1u); xyz10 = xyz00+(uint3)(1u, 0u, 0u); xyz11 = xyz00+(uint3)(1u, 0u, 1u); normal = (float3)(0.0f, 1.0f, 0.0f); break;
+		case 2u: xyz00 = (uint3)(a%def_Nx, a/def_Nx, (uint)slice_z); if(xyz00.x>=def_Nx-1u||xyz00.y>=def_Ny-1u) return; xyz01 = xyz00+(uint3)(0u, 1u, 0u); xyz10 = xyz00+(uint3)(1u, 0u, 0u); xyz11 = xyz00+(uint3)(1u, 1u, 0u); normal = (float3)(0.0f, 0.0f, 1.0f); break;
+	}
+	const float3 p00=position(xyz00), p01=position(xyz01), p10=position(xyz10), p11=position(xyz11), p=0.25f*(p00+p01+p10+p11);
+	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
+	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
+	if(!is_in_camera_frustrum(p, camera_cache)) return; // skip loading LBM data if grid cell is not visible
+	const ulong n00=index(xyz00), n01=index(xyz01), n10=index(xyz10), n11=index(xyz11);
+	bool d00=true, d01=true, d10=true, d11=true;
+)+"#ifdef SURFACE"+R(
+	d00 = flags[n00]&(TYPE_F|TYPE_I); // only draw fluid or interface cells
+	d01 = flags[n01]&(TYPE_F|TYPE_I);
+	d10 = flags[n10]&(TYPE_F|TYPE_I);
+	d11 = flags[n11]&(TYPE_F|TYPE_I);
+	if((int)d00+(int)d01+(int)d10+(int)d11<3) return;
+)+"#endif"+R( // SURFACE
+	int c00=0, c01=0, c10=0, c11=0;
+	switch(field_mode) {
+		case 0: // coloring by velocity
+			c00 = colorscale_rainbow(def_scale_u*length(load_u(n00, u)));
+			c01 = colorscale_rainbow(def_scale_u*length(load_u(n01, u)));
+			c10 = colorscale_rainbow(def_scale_u*length(load_u(n10, u)));
+			c11 = colorscale_rainbow(def_scale_u*length(load_u(n11, u)));
+			break;
+		case 1: // coloring by density
+			c00 = colorscale_twocolor(0.5f+def_scale_rho*(rho[n00]-1.0f));
+			c01 = colorscale_twocolor(0.5f+def_scale_rho*(rho[n01]-1.0f));
+			c10 = colorscale_twocolor(0.5f+def_scale_rho*(rho[n10]-1.0f));
+			c11 = colorscale_twocolor(0.5f+def_scale_rho*(rho[n11]-1.0f));
+			break;
+)+"#ifdef TEMPERATURE"+R(
+		case 2: // coloring by temperature
+			c00 = colorscale_iron(0.5f+def_scale_T*(T[n00]-def_T_avg));
+			c01 = colorscale_iron(0.5f+def_scale_T*(T[n01]-def_T_avg));
+			c10 = colorscale_iron(0.5f+def_scale_T*(T[n10]-def_T_avg));
+			c11 = colorscale_iron(0.5f+def_scale_T*(T[n11]-def_T_avg));
+			break;
+)+"#endif"+R( // TEMPERATURE
+	}
+	c00 = shading(c00, p00, normal, camera_cache);
+	c01 = shading(c01, p01, normal, camera_cache);
+	c10 = shading(c10, p10, normal, camera_cache);
+	c11 = shading(c11, p11, normal, camera_cache);
+	const int c = color_average(color_average(c00, c11), color_average(c01, c10));
+	if(d00&&d01) draw_triangle_interpolated(p00, p01, p, c00, c01, c, camera_cache, bitmap, zbuffer);
+	if(d01&&d11) draw_triangle_interpolated(p01, p11, p, c01, c11, c, camera_cache, bitmap, zbuffer);
+	if(d11&&d10) draw_triangle_interpolated(p11, p10, p, c11, c10, c, camera_cache, bitmap, zbuffer);
+	if(d10&&d00) draw_triangle_interpolated(p10, p00, p, c10, c00, c, camera_cache, bitmap, zbuffer);
+}
+
+)+"#ifndef TEMPERATURE"+R(
+)+R(kernel void graphics_streamline(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const int slice_mode, const int slice_x, const int slice_y, const int slice_z, const global float* rho, const global float* u, const global uchar* flags) {
+)+"#else"+R( // TEMPERATURE
+)+R(kernel void graphics_streamline(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const int slice_mode, const int slice_x, const int slice_y, const int slice_z, const global float* rho, const global float* u, const global uchar* flags, const global float* T) {
+)+"#endif"+R( // TEMPERATURE
 	const uint n = get_global_id(0);
-	const float3 slice = position((uint3)(slice_x, slice_y, slice_z));
+	const float3 ps = (float3)((float)slice_x+0.5f-0.5f*(float)def_Nx, (float)slice_y+0.5f-0.5f*(float)def_Ny, (float)slice_z+0.5f-0.5f*(float)def_Nz);
 )+"#ifndef D2Q9"+R(
 	if(n>=(def_Nx/def_streamline_sparse)*(def_Ny/def_streamline_sparse)*(def_Nz/def_streamline_sparse)) return;
 	const uint z = n/((def_Nx/def_streamline_sparse)*(def_Ny/def_streamline_sparse)); // disassemble 1D index to 3D coordinates
@@ -2647,18 +2733,18 @@ string opencl_c_container() { return R( // ########################## begin of O
 	const uint y = t/(def_Nx/def_streamline_sparse);
 	const uint x = t%(def_Nx/def_streamline_sparse);
 	float3 p = (float)def_streamline_sparse*((float3)((float)x+0.5f, (float)y+0.5f, (float)z+0.5f))-0.5f*((float3)((float)def_Nx, (float)def_Ny, (float)def_Nz));
-	const bool rx=fabs(p.x-slice.x)>0.5f*(float)def_streamline_sparse, ry=fabs(p.y-slice.y)>0.5f*(float)def_streamline_sparse, rz=fabs(p.z-slice.z)>0.5f*(float)def_streamline_sparse;
+	const bool rx=fabs(p.x-ps.x)>0.5f*(float)def_streamline_sparse, ry=fabs(p.y-ps.y)>0.5f*(float)def_streamline_sparse, rz=fabs(p.z-ps.z)>0.5f*(float)def_streamline_sparse;
 )+"#else"+R( // D2Q9
 	if(n>=(def_Nx/def_streamline_sparse)*(def_Ny/def_streamline_sparse)) return;
 	const uint y = n/(def_Nx/def_streamline_sparse); // disassemble 1D index to 3D coordinates
 	const uint x = n%(def_Nx/def_streamline_sparse);
 	float3 p = ((float3)((float)def_streamline_sparse*((float)x+0.5f), (float)def_streamline_sparse*((float)y+0.5f), 0.5f))-0.5f*((float3)((float)def_Nx, (float)def_Ny, (float)def_Nz));
-	const bool rx=fabs(p.x-slice.x)>0.5f*(float)def_streamline_sparse, ry=fabs(p.y-slice.y)>0.5f*(float)def_streamline_sparse, rz=true;
-	)+"#endif"+R( // D2Q9
+	const bool rx=fabs(p.x-ps.x)>0.5f*(float)def_streamline_sparse, ry=fabs(p.y-ps.y)>0.5f*(float)def_streamline_sparse, rz=true;
+)+"#endif"+R( // D2Q9
 	if((slice_mode==1&&rx)||(slice_mode==2&&ry)||(slice_mode==3&&rz)||(slice_mode==4&&rx&&rz)||(slice_mode==5&&rx&&ry&&rz)||(slice_mode==6&&ry&&rz)||(slice_mode==7&&rx&&ry)) return;
-	if((slice_mode==1||slice_mode==5||slice_mode==4||slice_mode==7)&!rx) p.x = slice.x; // snap streamline position to slice position
-	if((slice_mode==2||slice_mode==5||slice_mode==6||slice_mode==7)&!ry) p.y = slice.y;
-	if((slice_mode==3||slice_mode==5||slice_mode==4||slice_mode==6)&!rz) p.z = slice.z;
+	if((slice_mode==1||slice_mode==5||slice_mode==4||slice_mode==7)&!rx) p.x = ps.x; // snap streamline position to slice position
+	if((slice_mode==2||slice_mode==5||slice_mode==6||slice_mode==7)&!ry) p.y = ps.y;
+	if((slice_mode==3||slice_mode==5||slice_mode==4||slice_mode==6)&!rz) p.z = ps.z;
 	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
 	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
 	const float hLx=0.5f*(float)(def_Nx-2u*(def_Dx>1u)), hLy=0.5f*(float)(def_Ny-2u*(def_Dy>1u)), hLz=0.5f*(float)(def_Nz-2u*(def_Dz>1u));
@@ -2676,35 +2762,58 @@ string opencl_c_container() { return R( // ########################## begin of O
 			p0 = p1;
 			p1 += (dt/ul)*un; // integrate forward in time
 			if(def_scale_u*ul<0.1f||p1.x<-hLx||p1.x>hLx||p1.y<-hLy||p1.y>hLy||p1.z<-hLz||p1.z>hLz) break;
-)+"#ifndef GRAPHICS_TEMPERATURE"+R(
-			const int c = iron_color(255.0f*def_scale_u*ul);
-)+"#else"+R( // GRAPHICS_TEMPERATURE
-			const int c = iron_color(167.0f+255.0f*(T[n]-def_T_avg));
-)+"#endif"+R( // GRAPHICS_TEMPERATURE
+			int c = 0; // coloring
+			switch(field_mode) {
+				case 0: c = colorscale_rainbow(def_scale_u*ul); break; // coloring by velocity
+				case 1: c = colorscale_twocolor(0.5f+def_scale_rho*(rho[n]-1.0f)); break; // coloring by density
+)+"#ifdef TEMPERATURE"+R(
+				case 2: c = colorscale_iron(0.5f+def_scale_T*(T[n]-def_T_avg)); break; // coloring by temperature
+)+"#endif"+R( // TEMPERATURE
+			}
 			draw_line(p0, p1, c, camera_cache, bitmap, zbuffer);
 		}
 	}
 }
 
-)+R(kernel void graphics_q_field(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer) {
+)+"#ifndef TEMPERATURE"+R(
+)+R(kernel void graphics_q_field(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const global float* rho, const global float* u, const global uchar* flags) {
+)+"#else"+R( // TEMPERATURE
+)+R(kernel void graphics_q_field(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const global float* rho, const global float* u, const global uchar* flags, const global float* T) {
+)+"#endif"+R( // TEMPERATURE
 	const uint n = get_global_id(0);
 	if(n>=(uint)def_N||is_halo(n)) return; // don't execute graphics_q_field() on halo
 	if(flags[n]&(TYPE_S|TYPE_E|TYPE_I|TYPE_G)) return;
+	const float3 p = position(coordinates(n));
+	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
+	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
+	if(!is_in_camera_frustrum(p, camera_cache)) return; // skip loading LBM data if grid cell is not visible
 	float3 un = load_u(n, u); // cache velocity
 	const float ul = length(un);
 	const float Q = calculate_Q(n, u);
 	if(Q<def_scale_Q_min||ul==0.0f) return; // don't draw lattice points where the velocity is very low
-	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
-	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
-	const float3 p = position(coordinates(n));
-	const int c = rainbow_color(255.0f*def_scale_u*ul); // coloring by velocity
+	int c = 0; // coloring
+	switch(field_mode) {
+		case 0: c = colorscale_rainbow(def_scale_u*ul); break; // coloring by velocity
+		case 1: c = colorscale_twocolor(0.5f+def_scale_rho*(rho[n]-1.0f)); break; // coloring by density
+)+"#ifdef TEMPERATURE"+R(
+		case 2: c = colorscale_iron(0.5f+def_scale_T*(T[n]-def_T_avg)); break; // coloring by temperature
+)+"#endif"+R( // TEMPERATURE
+	}
 	draw_line(p-(0.5f/ul)*un, p+(0.5f/ul)*un, c, camera_cache, bitmap, zbuffer);
 }
 
-)+R(kernel void graphics_q(const global uchar* flags, const global float* u, const global float* camera, global int* bitmap, global int* zbuffer) {
+)+"#ifndef TEMPERATURE"+R(
+)+R(kernel void graphics_q(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const global float* rho, const global float* u, const global uchar* flags) {
+)+"#else"+R( // TEMPERATURE
+)+R(kernel void graphics_q(const global float* camera, global int* bitmap, global int* zbuffer, const int field_mode, const global float* rho, const global float* u, const global uchar* flags, const global float* T) {
+)+"#endif"+R( // TEMPERATURE
 	const uint n = get_global_id(0);
 	const uint3 xyz = coordinates(n);
 	if(xyz.x>=def_Nx-1u||xyz.y>=def_Ny-1u||xyz.z>=def_Nz-1u||is_halo_q(xyz)) return; // don't execute graphics_q_field() on marching-cubes halo
+	const float3 p = position(xyz);
+	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
+	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
+	if(!is_in_camera_frustrum(p, camera_cache)) return; // skip loading LBM data if grid cell is not visible
 	const uint x0 =  xyz.x; // cube stencil
 	const uint xp =  xyz.x+1u;
 	const uint y0 =  xyz.y    *def_Nx;
@@ -2767,36 +2876,76 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float3 triangles[15]; // maximum of 5 triangles with 3 vertices each
 	const uint tn = marching_cubes(v, def_scale_Q_min, triangles); // run marching cubes algorithm
 	if(tn==0u) return;
-	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
-	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
-	const float3 offset = (float3)((float)xyz.x+0.5f-0.5f*(float)def_Nx, (float)xyz.y+0.5f-0.5f*(float)def_Ny, (float)xyz.z+0.5f-0.5f*(float)def_Nz);
 	for(uint i=0u; i<tn; i++) {
 		const float3 p0 = triangles[3u*i   ]; // triangle coordinates in [0,1] (local cell)
 		const float3 p1 = triangles[3u*i+1u];
 		const float3 p2 = triangles[3u*i+2u];
 		const float3 normal = normalize(cross(p1-p0, p2-p0));
-		int c0, c1, c2; {
-			const float x1=p0.x, y1=p0.y, z1=p0.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
-			const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
-			c0 = shading(rainbow_color(255.0f*def_scale_u*length(ui)), p0+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
-		} {
-			const float x1=p1.x, y1=p1.y, z1=p1.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
-			const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
-			c1 = shading(rainbow_color(255.0f*def_scale_u*length(ui)), p1+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
-		} {
-			const float x1=p2.x, y1=p2.y, z1=p2.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
-			const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
-			c2 = shading(rainbow_color(255.0f*def_scale_u*length(ui)), p2+offset, normal, camera_cache); // rainbow_color(255.0f*def_scale_u*length(ui));
+		int c0=0, c1=0, c2=0;
+		switch(field_mode) {
+			case 0: // coloring by velocity
+				{
+					const float x1=p0.x, y1=p0.y, z1=p0.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
+					c0 = shading(colorscale_rainbow(def_scale_u*length(ui)), p+p0, normal, camera_cache); // colorscale_rainbow(def_scale_u*length(ui));
+				} {
+					const float x1=p1.x, y1=p1.y, z1=p1.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
+					c1 = shading(colorscale_rainbow(def_scale_u*length(ui)), p+p1, normal, camera_cache); // colorscale_rainbow(def_scale_u*length(ui));
+				} {
+					const float x1=p2.x, y1=p2.y, z1=p2.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float3 ui = (x0*y0*z0)*uj[0]+(x1*y0*z0)*uj[1]+(x1*y0*z1)*uj[2]+(x0*y0*z1)*uj[3]+(x0*y1*z0)*uj[4]+(x1*y1*z0)*uj[5]+(x1*y1*z1)*uj[6]+(x0*y1*z1)*uj[7]; // perform trilinear interpolation
+					c2 = shading(colorscale_rainbow(def_scale_u*length(ui)), p+p2, normal, camera_cache); // colorscale_rainbow(def_scale_u*length(ui));
+				}
+				break;
+			case 1: // coloring by density
+				for(uint i=0u; i<8u; i++) v[i] = rho[j[i]];
+				{
+					const float x1=p0.x, y1=p0.y, z1=p0.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float vi = (x0*y0*z0)*v[0]+(x1*y0*z0)*v[1]+(x1*y0*z1)*v[2]+(x0*y0*z1)*v[3]+(x0*y1*z0)*v[4]+(x1*y1*z0)*v[5]+(x1*y1*z1)*v[6]+(x0*y1*z1)*v[7]; // perform trilinear interpolation
+					c0 = shading(colorscale_twocolor(0.5f+def_scale_rho*(vi-1.0f)), p+p0, normal, camera_cache); // colorscale_twocolor(0.5f+def_scale_rho*(vi-1.0f));
+				} {
+					const float x1=p1.x, y1=p1.y, z1=p1.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float vi = (x0*y0*z0)*v[0]+(x1*y0*z0)*v[1]+(x1*y0*z1)*v[2]+(x0*y0*z1)*v[3]+(x0*y1*z0)*v[4]+(x1*y1*z0)*v[5]+(x1*y1*z1)*v[6]+(x0*y1*z1)*v[7]; // perform trilinear interpolation
+					c1 = shading(colorscale_twocolor(0.5f+def_scale_rho*(vi-1.0f)), p+p1, normal, camera_cache); // colorscale_twocolor(0.5f+def_scale_rho*(vi-1.0f));
+				} {
+					const float x1=p2.x, y1=p2.y, z1=p2.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float vi = (x0*y0*z0)*v[0]+(x1*y0*z0)*v[1]+(x1*y0*z1)*v[2]+(x0*y0*z1)*v[3]+(x0*y1*z0)*v[4]+(x1*y1*z0)*v[5]+(x1*y1*z1)*v[6]+(x0*y1*z1)*v[7]; // perform trilinear interpolation
+					c2 = shading(colorscale_twocolor(0.5f+def_scale_rho*(vi-1.0f)), p+p2, normal, camera_cache); // colorscale_twocolor(0.5f+def_scale_rho*(vi-1.0f));
+				}
+				break;
+)+"#ifdef TEMPERATURE"+R(
+			case 2: // coloring by temperature
+				for(uint i=0u; i<8u; i++) v[i] = T[j[i]];
+				{
+					const float x1=p0.x, y1=p0.y, z1=p0.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float vi = (x0*y0*z0)*v[0]+(x1*y0*z0)*v[1]+(x1*y0*z1)*v[2]+(x0*y0*z1)*v[3]+(x0*y1*z0)*v[4]+(x1*y1*z0)*v[5]+(x1*y1*z1)*v[6]+(x0*y1*z1)*v[7]; // perform trilinear interpolation
+					c0 = shading(colorscale_iron(0.5f+def_scale_T*(vi-def_T_avg)), p+p0, normal, camera_cache); // colorscale_iron(0.5f+def_scale_T*(T[n]-def_T_avg));
+				} {
+					const float x1=p1.x, y1=p1.y, z1=p1.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float vi = (x0*y0*z0)*v[0]+(x1*y0*z0)*v[1]+(x1*y0*z1)*v[2]+(x0*y0*z1)*v[3]+(x0*y1*z0)*v[4]+(x1*y1*z0)*v[5]+(x1*y1*z1)*v[6]+(x0*y1*z1)*v[7]; // perform trilinear interpolation
+					c1 = shading(colorscale_iron(0.5f+def_scale_T*(vi-def_T_avg)), p+p1, normal, camera_cache); // colorscale_iron(0.5f+def_scale_T*(T[n]-def_T_avg));
+				} {
+					const float x1=p2.x, y1=p2.y, z1=p2.z, x0=1.0f-x1, y0=1.0f-y1, z0=1.0f-z1; // calculate interpolation factors
+					const float vi = (x0*y0*z0)*v[0]+(x1*y0*z0)*v[1]+(x1*y0*z1)*v[2]+(x0*y0*z1)*v[3]+(x0*y1*z0)*v[4]+(x1*y1*z0)*v[5]+(x1*y1*z1)*v[6]+(x0*y1*z1)*v[7]; // perform trilinear interpolation
+					c2 = shading(colorscale_iron(0.5f+def_scale_T*(vi-def_T_avg)), p+p2, normal, camera_cache); // colorscale_iron(0.5f+def_scale_T*(T[n]-def_T_avg));
+				}
+				break;
+)+"#endif"+R( // TEMPERATURE
 		}
-		draw_triangle_interpolated(p0+offset, p1+offset, p2+offset, c0, c1, c2, camera_cache, bitmap, zbuffer); // draw triangle with interpolated colors
+		draw_triangle_interpolated(p+p0, p+p1, p+p2, c0, c1, c2, camera_cache, bitmap, zbuffer); // draw triangle with interpolated colors
 	}
 }
 
 )+"#ifdef SURFACE"+R(
-)+R(kernel void graphics_rasterize_phi(const global float* phi, const global float* camera, global int* bitmap, global int* zbuffer) { // marching cubes
+)+R(kernel void graphics_rasterize_phi(const global float* camera, global int* bitmap, global int* zbuffer, const global float* phi) { // marching cubes
 	const uint n = get_global_id(0);
 	const uint3 xyz = coordinates(n);
 	if(xyz.x>=def_Nx-1u||xyz.y>=def_Ny-1u||xyz.z>=def_Nz-1u) return;
+	const float3 p = position(xyz);
+	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
+	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
+	if(!is_in_camera_frustrum(p, camera_cache)) return; // skip loading LBM data if grid cell is not visible
 	uint j[8];
 	const uint x0 =  xyz.x; // cube stencil
 	const uint xp =  xyz.x+1u;
@@ -2817,19 +2966,19 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float3 triangles[15]; // maximum of 5 triangles with 3 vertices each
 	const uint tn = marching_cubes(v, 0.5f, triangles); // run marching cubes algorithm
 	if(tn==0u) return;
-	float camera_cache[15]; // cache camera parameters in case the kernel draws more than one shape
-	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
-	const float3 offset = (float3)((float)xyz.x+0.5f-0.5f*(float)def_Nx, (float)xyz.y+0.5f-0.5f*(float)def_Ny, (float)xyz.z+0.5f-0.5f*(float)def_Nz);
 	for(uint i=0u; i<tn; i++) {
-		const float3 p0 = triangles[3u*i   ]+offset;
-		const float3 p1 = triangles[3u*i+1u]+offset;
-		const float3 p2 = triangles[3u*i+2u]+offset;
-		const float3 p=(p0+p1+p2)/3.0f, normal=cross(p1-p0, p2-p0);
-		const int c = shading(55<<16|155<<8|255, p, normal, camera_cache);
-		draw_triangle(p0, p1, p2, c, camera_cache, bitmap, zbuffer);
-		//draw_line(p0, p1, c, camera_cache, bitmap, zbuffer); // wireframe rendering
-		//draw_line(p0, p2, c, camera_cache, bitmap, zbuffer);
-		//draw_line(p1, p2, c, camera_cache, bitmap, zbuffer);
+		const float3 p0 = triangles[3u*i   ];
+		const float3 p1 = triangles[3u*i+1u];
+		const float3 p2 = triangles[3u*i+2u];
+		const float3 normal = normalize(cross(p1-p0, p2-p0));
+		const int c0 = shading(0x379BFF, p+p0, normal, camera_cache);
+		const int c1 = shading(0x379BFF, p+p1, normal, camera_cache);
+		const int c2 = shading(0x379BFF, p+p2, normal, camera_cache);
+		draw_triangle_interpolated(p+p0, p+p1, p+p2, c0, c1, c2, camera_cache, bitmap, zbuffer);
+		//const int c = shading(0x379BFF, p+(p0+p1+p2)/3.0f, normal, camera_cache);
+		//draw_line(p+p0, p+p1, c, camera_cache, bitmap, zbuffer); // wireframe rendering
+		//draw_line(p+p0, p+p2, c, camera_cache, bitmap, zbuffer);
+		//draw_line(p+p1, p+p2, c, camera_cache, bitmap, zbuffer);
 	}
 }
 
@@ -2860,7 +3009,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	return color_reflect;
 }
 
-)+R(kernel void graphics_raytrace_phi(const global float* phi, const global uchar* flags, const global int* skybox, const global float* camera, global int* bitmap) { // marching cubes
+)+R(kernel void graphics_raytrace_phi(const global float* camera, global int* bitmap, const global int* skybox, const global float* phi, const global uchar* flags) { // marching cubes
 	const uint gid = get_global_id(0); // workgroup size alignment is critical
 	const uint lid = get_local_id(0); // make workgropus not horizontal stripes of pixels, but 8x8 rectangular (close to square) tiles
 	const uint lsi = get_local_size(0); // (50% performance boost due to more coalesced memory access)
@@ -2894,15 +3043,15 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // SURFACE
 
 )+"#ifdef PARTICLES"+R(
-)+R(kernel void graphics_particles(const global float* particles, const global float* camera, global int* bitmap, global int* zbuffer) {
+)+R(kernel void graphics_particles(const global float* camera, global int* bitmap, global int* zbuffer, const global float* particles) {
 	const uint n = get_global_id(0);
 	if(n>=(uint)def_particles_N) return;
 	float camera_cache[15]; // cache parameters in case the kernel draws more than one shape
 	for(uint i=0u; i<15u; i++) camera_cache[i] = camera[i];
 	const int c = COLOR_P; // coloring scheme
 	const float3 p = (float3)(particles[n], particles[def_particles_N+(ulong)n], particles[2ul*def_particles_N+(ulong)n]);
-	//draw_circle(p, 0.5f, c, camera_cache, bitmap, zbuffer);
 	draw_point(p, c, camera_cache, bitmap, zbuffer);
+	//draw_circle(p, 0.5f, c, camera_cache, bitmap, zbuffer);
 }
 )+"#endif"+R( // PARTICLES
 )+"#endif"+R( // GRAPHICS
